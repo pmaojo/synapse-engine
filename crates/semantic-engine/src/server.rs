@@ -18,6 +18,13 @@ pub struct MySemanticEngine {
     pub store: Arc<SynapseStore>,
 }
 
+impl MySemanticEngine {
+    pub fn new(storage_path: &str) -> Self {
+        let store = SynapseStore::open("default", storage_path).unwrap();
+        Self { store: Arc::new(store) }
+    }
+}
+
 #[tonic::async_trait]
 impl SemanticEngine for MySemanticEngine {
     async fn ingest_triples(
@@ -213,4 +220,9 @@ impl SemanticEngine for MySemanticEngine {
             }
         }
     }
+}
+
+pub async fn run_mcp_stdio(engine: Arc<MySemanticEngine>) -> Result<(), Box<dyn std::error::Error>> {
+    let server = crate::mcp_stdio::McpStdioServer::new(engine);
+    server.run().await
 }

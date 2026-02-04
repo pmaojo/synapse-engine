@@ -1,8 +1,7 @@
 use std::env;
 use std::sync::Arc;
-use synapse_core::mcp_stdio::run_mcp_stdio;
 use synapse_core::server::{
-    semantic_engine::semantic_engine_server::SemanticEngineServer, MySemanticEngine,
+    proto::semantic_engine_server::SemanticEngineServer, MySemanticEngine, run_mcp_stdio
 };
 use tonic::transport::Server;
 
