@@ -1,4 +1,4 @@
-FROM rust:1.85-slim as builder
+FROM rust:1.88-slim as builder
 RUN apt-get update && apt-get install -y protobuf-compiler pkg-config libssl-dev clang libclang-dev
 WORKDIR /usr/src/synapse
 COPY . .
