@@ -1,0 +1,27 @@
+name: Publish to Crates.io
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+jobs:
+  publish:
+    name: Publish to Crates.io
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - name: Install Protobuf Compiler
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler
+
+      - name: Publish to Crates.io
+        run: |
+          cd crates/semantic-engine
+          cargo publish --token ${{ secrets.CARGO_REGISTRY_TOKEN }}
