@@ -1,187 +1,164 @@
-use crate::server::semantic_engine::semantic_engine_server::SemanticEngine;
 use crate::server::MySemanticEngine;
-use serde::Deserialize;
-use serde_json::json;
+use crate::server::proto::semantic_engine_server::SemanticEngine;
+use crate::server::proto::{IngestRequest, IngestFileRequest, Triple, Provenance};
+use crate::mcp_types::{McpRequest, McpResponse};
 use std::sync::Arc;
-use tokio::io::{stdin, AsyncBufReadExt, BufReader};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tonic::Request;
 
-#[derive(Debug, Deserialize)]
-struct JsonRpcRequest {
-    _jsonrpc: String,
-    method: String,
-    params: Option<serde_json::Value>,
-    id: Option<serde_json::Value>,
+pub struct McpStdioServer {
+    engine: Arc<MySemanticEngine>,
 }
 
-pub async fn run_mcp_stdio(
-    engine: Arc<MySemanticEngine>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let mut reader = BufReader::new(stdin()).lines();
+impl McpStdioServer {
+    pub fn new(engine: Arc<MySemanticEngine>) -> Self {
+        Self { engine }
+    }
 
-    while let Some(line) = reader.next_line().await? {
-        let request: JsonRpcRequest = match serde_json::from_str(&line) {
-            Ok(req) => req,
-            Err(_) => continue,
-        };
+    pub async fn run(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let mut reader = BufReader::new(tokio::io::stdin());
+        let mut writer = tokio::io::stdout();
 
-        let response = match request.method.as_str() {
-            "initialize" => json!({
-                "jsonrpc": "2.0",
-                "id": request.id,
-                "result": {
-                    "protocolVersion": "2024-11-05",
-                    "capabilities": {
-                        "tools": {}
-                    },
-                    "serverInfo": {
-                        "name": "Synapse-MCP",
-                        "version": "0.1.0"
-                    }
-                }
-            }),
-            "tools/list" => json!({
-                "jsonrpc": "2.0",
-                "id": request.id,
-                "result": {
-                    "tools": [
-                        {
-                            "name": "query_graph",
-                            "description": "Busca triples en el grafo de conocimiento",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "namespace": { "type": "string", "default": "robin_os" }
-                                }
-                            }
-                        },
-                        {
-                            "name": "ingest_triple",
-                            "description": "Añade un nuevo triple (sujeto, predicado, objeto) al grafo",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "subject": { "type": "string" },
-                                    "predicate": { "type": "string" },
-                                    "object": { "type": "string" },
-                                    "namespace": { "type": "string", "default": "robin_os" }
-                                },
-                                "required": ["subject", "predicate", "object"]
-                            }
-                        },
-                        {
-                            "name": "query_sparql",
-                            "description": "Ejecuta una consulta SPARQL sobre el grafo",
-                            "inputSchema": {
-                                "type": "object",
-                                "properties": {
-                                    "query": { "type": "string" },
-                                    "namespace": { "type": "string", "default": "robin_os" }
-                                },
-                                "required": ["query"]
-                            }
-                        }
-                    ]
-                }
-            }),
-            "tools/call" => {
-                let params = request.params.unwrap_or(json!({}));
-                let name = params["name"].as_str().unwrap_or("");
-                let args = &params["arguments"];
+        loop {
+            let mut line = String::new();
+            if reader.read_line(&mut line).await? == 0 {
+                break;
+            }
 
-                match name {
-                    "query_graph" => {
-                        let namespace = args["namespace"].as_str().unwrap_or("robin_os");
-                        let triples = engine
-                            .get_all_triples(tonic::Request::new(
-                                crate::server::semantic_engine::EmptyRequest {
-                                    namespace: namespace.to_string(),
-                                },
-                            ))
-                            .await?;
+            if let Ok(request) = serde_json::from_str::<McpRequest>(&line) {
+                let response = self.handle_request(request).await;
+                let response_json = serde_json::to_string(&response)? + "\n";
+                writer.write_all(response_json.as_bytes()).await?;
+            }
+        }
 
-                        let triples_text = triples
-                            .into_inner()
-                            .triples
-                            .into_iter()
-                            .map(|t| format!("({}, {}, {})", t.subject, t.predicate, t.object))
-                            .collect::<Vec<_>>()
-                            .join("\n");
+        Ok(())
+    }
 
-                        json!({
-                            "jsonrpc": "2.0",
-                            "id": request.id,
-                            "result": {
-                                "content": [{ "type": "text", "text": triples_text }]
-                            }
-                        })
-                    }
-                    "ingest_triple" => {
-                        let sub = args["subject"].as_str().unwrap_or("");
-                        let pred = args["predicate"].as_str().unwrap_or("");
-                        let obj = args["object"].as_str().unwrap_or("");
-                        let namespace = args["namespace"].as_str().unwrap_or("robin_os");
-
-                        let triple = crate::server::semantic_engine::Triple {
+    async fn handle_request(&self, request: McpRequest) -> McpResponse {
+        match request.method.as_str() {
+            "ingest" => {
+                if let Some(params) = request.params {
+                    if let (Some(sub), Some(pred), Some(obj)) = (
+                        params.get("subject").and_then(|v| v.as_str()),
+                        params.get("predicate").and_then(|v| v.as_str()),
+                        params.get("object").and_then(|v| v.as_str()),
+                    ) {
+                        let triple = Triple {
                             subject: sub.to_string(),
                             predicate: pred.to_string(),
                             object: obj.to_string(),
-                            provenance: None,
+                            provenance: Some(Provenance {
+                                source: "mcp".to_string(),
+                                timestamp: "".to_string(),
+                                method: "stdio".to_string(),
+                            }),
+                            embedding: vec![],
                         };
 
-                        engine
-                            .ingest_triples(tonic::Request::new(
-                                crate::server::semantic_engine::IngestRequest {
-                                    triples: vec![triple],
-                                    namespace: namespace.to_string(),
-                                },
-                            ))
-                            .await?;
+                        let engine = self.engine.clone();
+                        let ingest_request = Request::new(IngestRequest {
+                            triples: vec![triple],
+                            namespace: "default".to_string(),
+                        });
 
-                        json!({
-                            "jsonrpc": "2.0",
-                            "id": request.id,
-                            "result": {
-                                "content": [{ "type": "text", "text": format!("Triple ({}, {}, {}) ingerido correctamente en Synapse", sub, pred, obj) }]
+                        match engine.ingest_triples(ingest_request).await {
+                            Ok(_) => {
+                                return McpResponse {
+                                    jsonrpc: "2.0".to_string(),
+                                    id: request.id,
+                                    result: Some(serde_json::to_value("Ingested").unwrap()),
+                                    error: None,
+                                };
                             }
-                        })
-                    }
-                    "query_sparql" => {
-                        let query = args["query"].as_str().unwrap_or("");
-                        let namespace = args["namespace"].as_str().unwrap_or("robin_os");
-
-                        let res = engine
-                            .query_sparql(tonic::Request::new(
-                                crate::server::semantic_engine::SparqlRequest {
-                                    query: query.to_string(),
-                                    namespace: namespace.to_string(),
-                                },
-                            ))
-                            .await?;
-
-                        json!({
-                            "jsonrpc": "2.0",
-                            "id": request.id,
-                            "result": {
-                                "content": [{ "type": "text", "text": res.into_inner().results_json }]
+                            Err(e) => {
+                                return McpResponse {
+                                    jsonrpc: "2.0".to_string(),
+                                    id: request.id,
+                                    result: None,
+                                    error: Some(crate::mcp_types::McpError {
+                                        code: -32000,
+                                        message: e.to_string(),
+                                        data: None,
+                                    }),
+                                };
                             }
-                        })
+                        }
                     }
-                    _ => json!({
-                        "jsonrpc": "2.0",
-                        "id": request.id,
-                        "error": { "code": -32601, "message": "Tool not found" }
+                }
+                McpResponse {
+                    jsonrpc: "2.0".to_string(),
+                    id: request.id,
+                    result: None,
+                    error: Some(crate::mcp_types::McpError {
+                        code: -32602,
+                        message: "Invalid params".to_string(),
+                        data: None,
                     }),
                 }
             }
-            _ => json!({
-                "jsonrpc": "2.0",
-                "id": request.id,
-                "result": {}
-            }),
-        };
+            "ingest_file" => {
+                if let Some(params) = request.params {
+                    if let Some(path) = params.get("path").and_then(|v| v.as_str()) {
+                        let namespace = params.get("namespace")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or("default");
 
-        println!("{}", serde_json::to_string(&response)?);
+                        let engine = self.engine.clone();
+                        let ingest_request = Request::new(IngestFileRequest {
+                            file_path: path.to_string(),
+                            namespace: namespace.to_string(),
+                        });
+
+                        match engine.ingest_file(ingest_request).await {
+                            Ok(resp) => {
+                                let inner = resp.into_inner();
+                                return McpResponse {
+                                    jsonrpc: "2.0".to_string(),
+                                    id: request.id,
+                                    result: Some(serde_json::to_value(format!(
+                                        "Ingested {} triples from {}", 
+                                        inner.edges_added, path
+                                    )).unwrap()),
+                                    error: None,
+                                };
+                            }
+                            Err(e) => {
+                                return McpResponse {
+                                    jsonrpc: "2.0".to_string(),
+                                    id: request.id,
+                                    result: None,
+                                    error: Some(crate::mcp_types::McpError {
+                                        code: -32000,
+                                        message: e.to_string(),
+                                        data: None,
+                                    }),
+                                };
+                            }
+                        }
+                    }
+                }
+                McpResponse {
+                    jsonrpc: "2.0".to_string(),
+                    id: request.id,
+                    result: None,
+                    error: Some(crate::mcp_types::McpError {
+                        code: -32602,
+                        message: "Invalid params: 'path' required".to_string(),
+                        data: None,
+                    }),
+                }
+            }
+            _ => McpResponse {
+                jsonrpc: "2.0".to_string(),
+                id: request.id,
+                result: None,
+                error: Some(crate::mcp_types::McpError {
+                    code: -32601,
+                    message: "Method not found".to_string(),
+                    data: None,
+                }),
+            },
+        }
     }
-
-    Ok(())
 }

@@ -3,7 +3,8 @@ use oxigraph::model::*;
 use oxigraph::store::Store;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
+use crate::vector_store::VectorStore;
 
 pub struct SynapseStore {
     pub store: Store,
@@ -12,6 +13,8 @@ pub struct SynapseStore {
     pub id_to_uri: RwLock<HashMap<u32, String>>,
     pub uri_to_id: RwLock<HashMap<String, u32>>,
     pub next_id: std::sync::atomic::AtomicU32,
+    // Vector store for hybrid search
+    pub vector_store: Option<Arc<VectorStore>>,
 }
 
 impl SynapseStore {
@@ -19,12 +22,18 @@ impl SynapseStore {
         let path = PathBuf::from(storage_path).join(namespace);
         let store = Store::open(path)?;
         
+        // Initialize vector store (optional, can fail gracefully)
+        let vector_store = VectorStore::new(namespace)
+            .ok()
+            .map(Arc::new);
+        
         Ok(Self {
             store,
             namespace: namespace.to_string(),
             id_to_uri: RwLock::new(HashMap::new()),
             uri_to_id: RwLock::new(HashMap::new()),
             next_id: std::sync::atomic::AtomicU32::new(1),
+            vector_store,
         })
     }
 
@@ -53,7 +62,7 @@ impl SynapseStore {
         self.id_to_uri.read().unwrap().get(&id).cloned()
     }
 
-    pub fn ingest_triples(&self, triples: Vec<(String, String, String)>) -> Result<(u32, u32)> {
+    pub async fn ingest_triples(&self, triples: Vec<(String, String, String)>) -> Result<(u32, u32)> {
         let mut added = 0;
         
         for (s, p, o) in triples {
@@ -68,10 +77,106 @@ impl SynapseStore {
             let quad = Quad::new(subject, predicate, object, GraphName::DefaultGraph);
             if self.store.insert(&quad)? {
                 added += 1;
+                
+                // Also index in vector store if available
+                if let Some(ref vs) = self.vector_store {
+                    // Create searchable content from triple
+                    let content = format!("{} {} {}", s, p, o);
+                    let _ = vs.add(&subject_uri, &content).await;
+                }
             }
         }
 
         Ok((added, 0))
+    }
+
+    /// Hybrid search: vector similarity + graph expansion
+    pub async fn hybrid_search(
+        &self,
+        query: &str,
+        vector_k: usize,
+        graph_depth: u32,
+    ) -> Result<Vec<(String, f32)>> {
+        let mut results = Vec::new();
+        
+        // Step 1: Vector search
+        if let Some(ref vs) = self.vector_store {
+            let vector_results = vs.search(query, vector_k).await?;
+            
+            for result in vector_results {
+                results.push((result.uri.clone(), result.score));
+                
+                // Step 2: Graph expansion (if depth > 0)
+                if graph_depth > 0 {
+                    let expanded = self.expand_graph(&result.uri, graph_depth)?;
+                    for uri in expanded {
+                        // Add with slightly lower score
+                        results.push((uri, result.score * 0.8));
+                    }
+                }
+            }
+        }
+        
+        // Remove duplicates and sort by score
+        results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+        results.dedup_by(|a, b| a.0 == b.0);
+        
+        Ok(results)
+    }
+
+    /// Expand graph from a starting URI
+    fn expand_graph(&self, start_uri: &str, depth: u32) -> Result<Vec<String>> {
+        let mut expanded = Vec::new();
+        
+        if depth == 0 {
+            return Ok(expanded);
+        }
+        
+        // Query for all triples where start_uri is subject or object
+        let subject = NamedNodeRef::new(start_uri).ok();
+        
+        if let Some(subj) = subject {
+            for quad in self.store.quads_for_pattern(
+                Some(subj.into()),
+                None,
+                None,
+                None,
+            ) {
+                if let Ok(q) = quad {
+                    expanded.push(q.object.to_string());
+                    
+                    // Recursive expansion (simplified, depth-1)
+                    if depth > 1 {
+                        let nested = self.expand_graph(&q.object.to_string(), depth - 1)?;
+                        expanded.extend(nested);
+                    }
+                }
+            }
+        }
+        
+        Ok(expanded)
+    }
+
+    pub fn query_sparql(&self, query: &str) -> Result<String> {
+        use oxigraph::sparql::QueryResults;
+        
+        let results = self.store.query(query)?;
+        
+        match results {
+            QueryResults::Solutions(solutions) => {
+                let mut results_array = Vec::new();
+                for solution in solutions {
+                    let sol = solution?;
+                    let mut mapping = serde_json::Map::new();
+                    for (variable, value) in sol.iter() {
+                        mapping.insert(variable.to_string(), serde_json::to_value(value.to_string()).unwrap());
+                    }
+                    results_array.push(serde_json::Value::Object(mapping));
+                }
+                Ok(serde_json::to_string(&results_array)?)
+            }
+            _ => Ok("[]".to_string()),
+        }
     }
 
     fn ensure_uri(&self, s: &str) -> String {

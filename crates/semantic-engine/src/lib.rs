@@ -3,3 +3,7 @@ pub mod mcp_stdio;
 pub mod persistence;
 pub mod server;
 pub mod store;
+pub mod vector_store;
+pub mod reasoner;
+pub mod mcp_types;
+pub mod ingest;

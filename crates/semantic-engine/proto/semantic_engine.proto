@@ -5,6 +5,9 @@ service SemanticEngine {
     // Ingests a batch of triples
     rpc IngestTriples (IngestRequest) returns (IngestResponse);
     
+    // Ingests a file (CSV, Markdown)
+    rpc IngestFile (IngestFileRequest) returns (IngestResponse);
+    
     // Queries the graph (Basic traversal for now)
     rpc GetNeighbors (NodeRequest) returns (NeighborResponse);
     
@@ -22,6 +25,12 @@ service SemanticEngine {
 
     // Deletes all data associated with a namespace
     rpc DeleteNamespaceData (EmptyRequest) returns (DeleteResponse);
+
+    // Hybrid search combining vector similarity and graph traversal
+    rpc HybridSearch (HybridSearchRequest) returns (SearchResponse);
+
+    // Applies automated reasoning to a namespace
+    rpc ApplyReasoning (ReasoningRequest) returns (ReasoningResponse);
 }
 
 message SparqlRequest {
@@ -49,10 +58,16 @@ message Triple {
     string predicate = 2;
     string object = 3;
     Provenance provenance = 4;
+    repeated float embedding = 5;  // Vector embedding for hybrid search
 }
 
 message IngestRequest {
     repeated Triple triples = 1;
+    string namespace = 2;
+}
+
+message IngestFileRequest {
+    string file_path = 1;
     string namespace = 2;
 }
 
@@ -89,6 +104,22 @@ message SearchResult {
     uint32 node_id = 1;
     float score = 2;
     string content = 3;
+    string uri = 4;  // Full URI of the entity
+}
+
+enum SearchMode {
+    VECTOR_ONLY = 0;
+    GRAPH_ONLY = 1;
+    HYBRID = 2;
+}
+
+message HybridSearchRequest {
+    string query = 1;
+    string namespace = 2;
+    uint32 vector_k = 3;      // Top-K from vector search
+    uint32 graph_depth = 4;   // Graph expansion depth (0 = no expansion)
+    SearchMode mode = 5;      // Search strategy
+    uint32 limit = 6;         // Final result limit
 }
 
 message ResolveRequest {
@@ -107,4 +138,22 @@ message EmptyRequest {
 
 message TriplesResponse {
     repeated Triple triples = 1;
+}
+
+message ReasoningRequest {
+    string namespace = 1;
+    ReasoningStrategy strategy = 2;
+    bool materialize = 3;  // Whether to save inferred triples to the store
+}
+
+enum ReasoningStrategy {
+    NONE = 0;
+    RDFS = 1;
+    OWLRL = 2;
+}
+
+message ReasoningResponse {
+    bool success = 1;
+    uint32 triples_inferred = 2;
+    string message = 3;
 }

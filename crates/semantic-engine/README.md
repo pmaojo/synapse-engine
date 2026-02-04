@@ -28,8 +28,10 @@ It is designed to work seamlessly with **OpenClaw** and other agentic frameworks
 - **Dual Protocol Support**:
   - **gRPC API** for high-performance programmatic access
   - **MCP Server** for seamless LLM agent integration
-- **OWL Reasoning**: Built-in support for OWL RL reasoning via `reasonable` (deductive inference)
-- **High Performance**: Written in Rust with async I/O for minimal latency
+- **OWL Reasoning**: Built-in support for OWL 2 RL reasoning via `reasonable` crate
+- **Hybrid Search**: Combines vector similarity with graph traversal (using local HNSW index)
+- **HuggingFace API Integration**: High-performance embeddings without local GPU/CPU heavy lifting
+- **High Performance**: Written in Rust with async I/O and efficient HNSW indexing
 - **Persistent Storage**: Automatic persistence with namespace-specific storage paths
 
 ## 📦 Installation
@@ -123,7 +125,43 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 ```
 
-### 4. SPARQL Queries
+### 4. Hybrid Search
+
+Retrieve entities matching both semantic similarity (vector) and structural relationship (graph):
+
+```rust
+use synapse_core::server::proto::{HybridSearchRequest, SearchMode};
+
+let request = HybridSearchRequest {
+    query: "What are the latest findings on neuro-symbolic AI?".to_string(),
+    namespace: "research".to_string(),
+    vector_k: 10,       // Top-K vectors
+    graph_depth: 2,    // Expand graph 2 levels deep from results
+    mode: SearchMode::Hybrid as i32,
+    limit: 5,
+};
+
+let response = engine.hybrid_search(Request::new(request)).await?;
+```
+
+### 5. Automated Reasoning
+
+Apply OWL-RL or RDFS reasoning to derive implicit knowledge:
+
+```rust
+use synapse_core::server::proto::{ReasoningRequest, ReasoningStrategy};
+
+let request = ReasoningRequest {
+    namespace: "ontology".to_string(),
+    strategy: ReasoningStrategy::Owlrl as i32,
+    materialize: true, // Save inferred triples to storage
+};
+
+let response = engine.apply_reasoning(Request::new(request)).await?;
+println!("Inferred {} new facts", response.into_inner().triples_inferred);
+```
+
+### 6. SPARQL Queries
 
 Query your knowledge graph using SPARQL:
 
@@ -147,7 +185,7 @@ let response = engine.query_sparql(Request::new(request)).await?;
 println!("Results: {}", response.into_inner().results_json);
 ```
 
-### 5. Multi-Namespace Usage
+### 7. Multi-Namespace Usage
 
 Isolate different knowledge domains:
 
@@ -176,15 +214,17 @@ let work_data = engine.get_all_triples(Request::new(EmptyRequest {
 
 The `SemanticEngine` service provides the following RPC methods:
 
-| Method                | Request          | Response           | Description                                    |
-| --------------------- | ---------------- | ------------------ | ---------------------------------------------- |
-| `IngestTriples`       | `IngestRequest`  | `IngestResponse`   | Add RDF triples to the graph                   |
-| `GetNeighbors`        | `NodeRequest`    | `NeighborResponse` | Graph traversal (get connected nodes)          |
-| `Search`              | `SearchRequest`  | `SearchResponse`   | Vector search (placeholder for hybrid queries) |
-| `ResolveId`           | `ResolveRequest` | `ResolveResponse`  | Resolve URI string to internal node ID         |
-| `GetAllTriples`       | `EmptyRequest`   | `TriplesResponse`  | Retrieve all triples from a namespace          |
-| `QuerySparql`         | `SparqlRequest`  | `SparqlResponse`   | Execute SPARQL 1.1 queries                     |
-| `DeleteNamespaceData` | `EmptyRequest`   | `DeleteResponse`   | Delete all data in a namespace                 |
+| Method                | Request               | Response            | Description                            |
+| --------------------- | --------------------- | ------------------- | -------------------------------------- |
+| `IngestTriples`       | `IngestRequest`       | `IngestResponse`    | Add RDF triples to the graph           |
+| `GetNeighbors`        | `NodeRequest`         | `NeighborResponse`  | Graph traversal (get connected nodes)  |
+| `Search`              | `SearchRequest`       | `SearchResponse`    | Legacy vector search                   |
+| `ResolveId`           | `ResolveRequest`      | `ResolveResponse`   | Resolve URI string to internal node ID |
+| `GetAllTriples`       | `EmptyRequest`        | `TriplesResponse`   | Retrieve all triples from a namespace  |
+| `QuerySparql`         | `SparqlRequest`       | `SparqlResponse`    | Execute SPARQL 1.1 queries             |
+| `DeleteNamespaceData` | `EmptyRequest`        | `DeleteResponse`    | Delete all data in a namespace         |
+| `HybridSearch`        | `HybridSearchRequest` | `SearchResponse`    | AI Search (Vector + Graph)             |
+| `ApplyReasoning`      | `ReasoningRequest`    | `ReasoningResponse` | Trigger deductive inference            |
 
 **Proto Definition**: See [`semantic_engine.proto`](https://github.com/pmaojo/synapse-engine/blob/main/crates/semantic-engine/proto/semantic_engine.proto)
 
@@ -289,9 +329,10 @@ This enables multi-tenant scenarios and context separation.
 
 ### Environment Variables
 
-| Variable             | Default       | Description                          |
-| -------------------- | ------------- | ------------------------------------ |
-| `GRAPH_STORAGE_PATH` | `data/graphs` | Root directory for namespace storage |
+| Variable                | Default       | Description                                  |
+| ----------------------- | ------------- | -------------------------------------------- |
+| `GRAPH_STORAGE_PATH`    | `data/graphs` | Root directory for namespace storage         |
+| `HUGGINGFACE_API_TOKEN` | `(optional)`  | Token for Inference API (higher rate limits) |
 
 ### Storage Structure
 
