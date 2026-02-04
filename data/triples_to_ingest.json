@@ -1,0 +1,18 @@
+[
+  {"subject": "The Wise Dreams", "predicate": "is_a", "object": "Project"},
+  {"subject": "The Wise Dreams", "predicate": "related_to", "object": "Pelayo"},
+  {"subject": "Triportation", "predicate": "is_a", "object": "Project"},
+  {"subject": "Triportation", "predicate": "domain", "object": "Neuro-symbolic AI"},
+  {"subject": "Neuro-symbolic AI", "predicate": "is_a", "object": "Field"},
+  {"subject": "Synapse", "predicate": "implements", "object": "Neuro-symbolic AI"},
+  {"subject": "Grafoso", "predicate": "is_a", "object": "LegacySystem"},
+  {"subject": "Grafoso", "predicate": "preceded", "object": "Synapse"},
+  {"subject": "Pelayo", "predicate": "has_role", "object": "Frontend Lead"},
+  {"subject": "Robin", "predicate": "formerly_known_as", "object": "Pi"},
+  {"subject": "Robin", "predicate": "runs_on", "object": "OpenClaw"},
+  {"subject": "Tripilots", "predicate": "is_a", "object": "Project"},
+  {"subject": "Tripilots", "predicate": "related_to", "object": "Triportation"},
+  {"subject": "Reforge", "predicate": "provides", "object": "Product Strategy"},
+  {"subject": "NotionTaskPull", "predicate": "status", "object": "Success"},
+  {"subject": "NotionTaskPull", "predicate": "result", "object": "No Changes"}
+]

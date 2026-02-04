@@ -1,0 +1,14 @@
+[Unit]
+Description=Synapse Semantic Engine (gRPC)
+After=network.target
+
+[Service]
+ExecStart=/home/robin/workspace/skills/synapse/bin/synapse
+WorkingDirectory=/home/robin/workspace/skills/synapse
+Environment=GRAPH_STORAGE_PATH=data/graphs
+Environment=RUST_LOG=info
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target
