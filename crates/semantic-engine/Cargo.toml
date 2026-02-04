@@ -3,6 +3,7 @@ name = "synapse-core"
 version.workspace = true
 edition.workspace = true
 description = "A neuro-symbolic semantic engine for OpenClaw, combining graph databases with vector operations."
+readme = "README.md"
 repository = "https://github.com/pmaojo/synapse-engine"
 license = "MIT"
 keywords = ["semantic", "graph", "ai", "openclaw"]
