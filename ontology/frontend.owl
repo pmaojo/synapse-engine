@@ -1,0 +1,44 @@
+<?xml version="1.0"?>
+<rdf:RDF xmlns="http://sys.semantic/frontend#"
+     xml:base="http://sys.semantic/frontend"
+     xmlns:owl="http://www.w3.org/2002/07/owl#"
+     xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+     xmlns:xml="http://www.w3.org/XML/1998/namespace"
+     xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
+     xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+     xmlns:core="http://sys.semantic/core#">
+    <owl:Ontology rdf:about="http://sys.semantic/frontend">
+        <owl:imports rdf:resource="http://sys.semantic/core"/>
+    </owl:Ontology>
+
+    <!-- Classes -->
+
+    <owl:Class rdf:about="http://sys.semantic/frontend#Artifact">
+        <rdfs:subClassOf rdf:resource="http://sys.semantic/core#Entity"/>
+    </owl:Class>
+
+    <owl:Class rdf:about="http://sys.semantic/frontend#Codebase">
+        <rdfs:subClassOf rdf:resource="http://sys.semantic/frontend#Artifact"/>
+    </owl:Class>
+
+    <owl:Class rdf:about="http://sys.semantic/frontend#PullRequest">
+        <rdfs:subClassOf rdf:resource="http://sys.semantic/core#Process"/>
+    </owl:Class>
+
+    <owl:Class rdf:about="http://sys.semantic/frontend#TechStack">
+        <rdfs:subClassOf rdf:resource="http://sys.semantic/core#Entity"/>
+    </owl:Class>
+
+    <!-- Properties -->
+
+    <owl:ObjectProperty rdf:about="http://sys.semantic/frontend#usesStack">
+        <rdfs:domain rdf:resource="http://sys.semantic/frontend#Codebase"/>
+        <rdfs:range rdf:resource="http://sys.semantic/frontend#TechStack"/>
+    </owl:ObjectProperty>
+
+    <owl:ObjectProperty rdf:about="http://sys.semantic/frontend#targets">
+        <rdfs:domain rdf:resource="http://sys.semantic/frontend#PullRequest"/>
+        <rdfs:range rdf:resource="http://sys.semantic/frontend#Codebase"/>
+    </owl:ObjectProperty>
+
+</rdf:RDF>

@@ -1,0 +1,88 @@
+{"text": "Forest garden es un tipo de diseño permacultural", "triples": [["FoodForest", "isA", "PermacultureSystem"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "cultivo de cobertura defiende Soil.", "triples": [["CoverCrop", "protects", "Soil"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "Compostaje produce soilnutrients", "triples": [["Composting", "produces", "SoilNutrients"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "Abono verde defiende soil", "triples": [["CoverCrop", "protects", "Soil"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "Compostaje genera soilnutrients", "triples": [["Composting", "produces", "SoilNutrients"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "forest garden es un tipo de diseño permacultural", "triples": [["FoodForest", "isA", "PermacultureSystem"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "abono verde defiende Soil", "triples": [["CoverCrop", "protects", "Soil"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "Bosque alimentario tiene fruittree como componente", "triples": [["FoodForest", "hasComponent", "FruitTree"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "Bosque alimentario está compuesto por fruittree.", "triples": [["FoodForest", "hasComponent", "FruitTree"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "bosque alimentario se clasifica como sistema de permacultura.", "triples": [["FoodForest", "isA", "PermacultureSystem"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "Un bosque alimentario es un diseño permacultural", "triples": [["FoodForest", "isA", "PermacultureSystem"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "Bosque alimentario es un tipo de sistema de permacultura", "triples": [["FoodForest", "isA", "PermacultureSystem"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "bosque comestible contiene FruitTree", "triples": [["FoodForest", "hasComponent", "FruitTree"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "bosque comestible es un tipo de diseño permacultural.", "triples": [["FoodForest", "isA", "PermacultureSystem"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "Farming regenerativo incrementa la calidad de fertilidad del suelo", "triples": [["RegenerativeAgriculture", "improves", "SoilHealth"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "Compost crea soilnutrients.", "triples": [["Composting", "produces", "SoilNutrients"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "Un swales es un WaterManagementStructure.", "triples": [["Swales", "isA", "WaterManagementStructure"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "Farming regenerativo incrementa la calidad de salud del suelo.", "triples": [["RegenerativeAgriculture", "improves", "SoilHealth"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "Swales se clasifica como watermanagementstructure", "triples": [["Swales", "isA", "WaterManagementStructure"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "compost genera SoilNutrients", "triples": [["Composting", "produces", "SoilNutrients"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "Bosque alimentario se clasifica como sistema de permacultura", "triples": [["FoodForest", "isA", "PermacultureSystem"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "Cultivo de cobertura protege soil", "triples": [["CoverCrop", "protects", "Soil"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "abono verde salvaguarda Soil", "triples": [["CoverCrop", "protects", "Soil"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "bosque comestible tiene FruitTree como componente.", "triples": [["FoodForest", "hasComponent", "FruitTree"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "Zanjas de nivel se clasifica como watermanagementstructure", "triples": [["Swales", "isA", "WaterManagementStructure"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "Bosque comestible contiene fruittree.", "triples": [["FoodForest", "hasComponent", "FruitTree"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "Swales se clasifica como watermanagementstructure.", "triples": [["Swales", "isA", "WaterManagementStructure"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "canales de infiltración se clasifica como WaterManagementStructure", "triples": [["Swales", "isA", "WaterManagementStructure"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "farming regenerativo mejora salud del suelo", "triples": [["RegenerativeAgriculture", "improves", "SoilHealth"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "Farming regenerativo incrementa la calidad de salud del suelo", "triples": [["RegenerativeAgriculture", "improves", "SoilHealth"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "farming regenerativo mejora fertilidad del suelo", "triples": [["RegenerativeAgriculture", "improves", "SoilHealth"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "Un bosque alimentario es un diseño permacultural", "triples": [["FoodForest", "isA", "PermacultureSystem"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "abono verde defiende Soil", "triples": [["CoverCrop", "protects", "Soil"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "bosque comestible tiene FruitTree como componente", "triples": [["FoodForest", "hasComponent", "FruitTree"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "Compostaje produce soilnutrients.", "triples": [["Composting", "produces", "SoilNutrients"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "Un forest garden es un diseño permacultural.", "triples": [["FoodForest", "isA", "PermacultureSystem"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "Bosque alimentario está compuesto por fruittree", "triples": [["FoodForest", "hasComponent", "FruitTree"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "forest garden está compuesto por FruitTree", "triples": [["FoodForest", "hasComponent", "FruitTree"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "Farming regenerativo incrementa la calidad de salud del suelo", "triples": [["RegenerativeAgriculture", "improves", "SoilHealth"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "forest garden tiene FruitTree como componente", "triples": [["FoodForest", "hasComponent", "FruitTree"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "Forest garden se clasifica como diseño permacultural", "triples": [["FoodForest", "isA", "PermacultureSystem"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "Un zanjas de nivel es un watermanagementstructure", "triples": [["Swales", "isA", "WaterManagementStructure"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "Un forest garden es un diseño permacultural", "triples": [["FoodForest", "isA", "PermacultureSystem"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "compostaje genera SoilNutrients", "triples": [["Composting", "produces", "SoilNutrients"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "Bosque alimentario contiene fruittree.", "triples": [["FoodForest", "hasComponent", "FruitTree"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "compost crea SoilNutrients", "triples": [["Composting", "produces", "SoilNutrients"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "Un zanjas de nivel es un watermanagementstructure.", "triples": [["Swales", "isA", "WaterManagementStructure"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "bosque comestible tiene FruitTree como componente", "triples": [["FoodForest", "hasComponent", "FruitTree"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "Zanjas de nivel es un tipo de watermanagementstructure", "triples": [["Swales", "isA", "WaterManagementStructure"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "Un bosque alimentario es un diseño permacultural", "triples": [["FoodForest", "isA", "PermacultureSystem"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "bosque alimentario tiene FruitTree como componente.", "triples": [["FoodForest", "hasComponent", "FruitTree"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "compost produce SoilNutrients", "triples": [["Composting", "produces", "SoilNutrients"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "Un swales es un WaterManagementStructure", "triples": [["Swales", "isA", "WaterManagementStructure"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "Compost produce soilnutrients.", "triples": [["Composting", "produces", "SoilNutrients"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "bosque alimentario contiene FruitTree", "triples": [["FoodForest", "hasComponent", "FruitTree"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "swales es un tipo de WaterManagementStructure", "triples": [["Swales", "isA", "WaterManagementStructure"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "Zanjas de nivel se clasifica como watermanagementstructure.", "triples": [["Swales", "isA", "WaterManagementStructure"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "compostaje genera SoilNutrients", "triples": [["Composting", "produces", "SoilNutrients"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "Forest garden está compuesto por fruittree", "triples": [["FoodForest", "hasComponent", "FruitTree"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "Compost genera soilnutrients.", "triples": [["Composting", "produces", "SoilNutrients"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "cultivo de cobertura defiende Soil", "triples": [["CoverCrop", "protects", "Soil"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "swales es un tipo de WaterManagementStructure", "triples": [["Swales", "isA", "WaterManagementStructure"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "agricultura regenerativa optimiza salud del suelo", "triples": [["RegenerativeAgriculture", "improves", "SoilHealth"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "Zanjas de nivel se clasifica como watermanagementstructure", "triples": [["Swales", "isA", "WaterManagementStructure"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "Un bosque comestible es un sistema de permacultura", "triples": [["FoodForest", "isA", "PermacultureSystem"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "Un zanjas de nivel es un watermanagementstructure", "triples": [["Swales", "isA", "WaterManagementStructure"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "abono verde defiende Soil", "triples": [["CoverCrop", "protects", "Soil"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "Abono verde defiende soil", "triples": [["CoverCrop", "protects", "Soil"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "compost genera SoilNutrients", "triples": [["Composting", "produces", "SoilNutrients"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "Canales de infiltración es un tipo de watermanagementstructure", "triples": [["Swales", "isA", "WaterManagementStructure"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "Canales de infiltración es un tipo de watermanagementstructure", "triples": [["Swales", "isA", "WaterManagementStructure"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "forest garden se clasifica como diseño permacultural", "triples": [["FoodForest", "isA", "PermacultureSystem"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "Agricultura regenerativa mejora salud del suelo", "triples": [["RegenerativeAgriculture", "improves", "SoilHealth"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "swales es un tipo de WaterManagementStructure.", "triples": [["Swales", "isA", "WaterManagementStructure"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "Bosque comestible se clasifica como diseño permacultural.", "triples": [["FoodForest", "isA", "PermacultureSystem"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "bosque alimentario contiene FruitTree", "triples": [["FoodForest", "hasComponent", "FruitTree"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "Bosque alimentario está compuesto por fruittree.", "triples": [["FoodForest", "hasComponent", "FruitTree"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "abono verde protege Soil.", "triples": [["CoverCrop", "protects", "Soil"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "Forest garden está compuesto por fruittree", "triples": [["FoodForest", "hasComponent", "FruitTree"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "canales de infiltración se clasifica como WaterManagementStructure", "triples": [["Swales", "isA", "WaterManagementStructure"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "bosque alimentario contiene FruitTree", "triples": [["FoodForest", "hasComponent", "FruitTree"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "Un bosque alimentario incluye FruitTree", "triples": [["FoodForest", "hasComponent", "FruitTree"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "compostaje crea SoilNutrients", "triples": [["Composting", "produces", "SoilNutrients"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "Cultivo de cobertura protege soil.", "triples": [["CoverCrop", "protects", "Soil"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "cultivo de cobertura salvaguarda Soil.", "triples": [["CoverCrop", "protects", "Soil"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "Cultivo de cobertura defiende soil", "triples": [["CoverCrop", "protects", "Soil"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "farming regenerativo incrementa la calidad de fertilidad del suelo.", "triples": [["RegenerativeAgriculture", "improves", "SoilHealth"]], "domain": "agriculture", "source": "synthetic_template"}
+{"text": "Un forest garden es un sistema de permacultura", "triples": [["FoodForest", "isA", "PermacultureSystem"]], "domain": "agriculture", "source": "synthetic_template"}

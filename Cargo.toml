@@ -1,0 +1,26 @@
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+authors = ["Grafoso Team"]
+
+[workspace]
+members = ["crates/*"]
+resolver = "2"
+
+[workspace.dependencies]
+tokio = { version = "1.36", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+thiserror = "1.0"
+anyhow = "1.0"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+tonic = "0.11"
+prost = "0.12"
+dashmap = "5.5"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1

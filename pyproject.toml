@@ -1,0 +1,26 @@
+[project]
+name = "semantic-system-trainer"
+version = "0.1.0"
+description = "Agent Lightning training pipeline for the Semantic System"
+requires-python = ">=3.10"
+dependencies = [
+    "rdflib>=7.0.0",
+    "pydantic>=2.0.0",
+    "grpcio>=1.60.0",
+    "grpcio-tools>=1.60.0",
+    "protobuf>=4.25.0",
+    "numpy>=1.24.0",
+    "torch>=2.0.0",
+    "transformers>=4.30.0",
+    "peft>=0.4.0",
+    "lightning>=2.0.0",
+    "accelerate>=0.20.0",
+    "bitsandbytes>=0.40.0",
+    "qdrant-client>=1.7.0",
+    "sentence-transformers>=2.2.0",
+    "litellm>=1.0.0",
+    "python-dotenv>=1.0.0"
+]
+
+[tool.setuptools]
+packages = ["agents"]

@@ -1,0 +1,47 @@
+{
+  "mcpServers": {
+    "grafoso-semantic-engine": {
+      "command": "../../target/release/semantic-engine",
+      "args": [],
+      "env": {},
+      "description": "Rust semantic engine with graph storage and gRPC interface"
+    },
+    "grafoso-python-tools": {
+      "command": "python",
+      "args": ["-m", "agents.server.mcp_server"],
+      "env": {
+        "PYTHONPATH": "/home/pelayo-maojo/grafoso"
+      },
+      "description": "Python MCP server exposing NL2Cypher, OWL reasoning, and pipelines"
+    }
+  },
+  "tools": {
+    "nl2cypher": {
+      "server": "grafoso-python-tools",
+      "description": "Natural language to Cypher query translation"
+    },
+    "owl_reasoning": {
+      "server": "grafoso-python-tools",
+      "description": "OWL inference and knowledge expansion"
+    },
+    "ontology_validation": {
+      "server": "grafoso-python-tools",
+      "description": "Validate triples against ontology schema"
+    },
+    "query_knowledge_graph": {
+      "server": "grafoso-semantic-engine",
+      "description": "Query the Rust-stored knowledge graph"
+    },
+    "add_observation": {
+      "server": "grafoso-semantic-engine",
+      "description": "Add new triples to the graph"
+    }
+  },
+  "orchestration": {
+    "enabled": true,
+    "llm_model": "gemini/gemini-1.5-flash",
+    "autonomous_mode": true,
+    "max_tool_calls_per_request": 5,
+    "allow_tool_composition": true
+  }
+}

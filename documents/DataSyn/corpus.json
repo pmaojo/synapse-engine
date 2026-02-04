@@ -1,0 +1,4 @@
+[
+  {"text": "La albahaca protege al tomate de plagas.", "plant": "Albahaca", "stage": "Summer", "function": "Protector"},
+  {"text": "La zanahoria es compañera del puerro.", "plant": "Zanahoria", "stage": "Spring", "function": "Companion"}
+]
