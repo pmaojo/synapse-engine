@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "synapse": {
+      "command": "./synapse",
+      "args": ["--mcp"],
+      "env": {
+        "GRAPH_STORAGE_PATH": "./data/graphs"
+      },
+      "description": "Synapse: High-performance neuro-symbolic knowledge graph for OpenClaw"
+    }
+  }
+}
