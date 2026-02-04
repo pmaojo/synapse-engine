@@ -10,11 +10,15 @@ pub mod topology {
         pub adj: Vec<Vec<(u32, u16, u32)>>,
     }
 
+    impl Default for GraphTopology {
+        fn default() -> Self {
+            Self::new()
+        }
+    }
+
     impl GraphTopology {
         pub fn new() -> Self {
-            Self {
-                adj: Vec::new(),
-            }
+            Self { adj: Vec::new() }
         }
 
         pub fn num_nodes(&self) -> usize {
@@ -26,7 +30,8 @@ pub mod topology {
         }
 
         pub fn neighbors(&self, node_id: u32) -> impl Iterator<Item = (u32, u16, u32)> + '_ {
-            self.adj.get(node_id as usize)
+            self.adj
+                .get(node_id as usize)
                 .into_iter()
                 .flatten()
                 .cloned()
@@ -54,8 +59,8 @@ pub mod topology {
 }
 
 pub mod properties {
-    use std::collections::HashMap;
     use serde::{Deserialize, Serialize};
+    use std::collections::HashMap;
 
     #[derive(Debug, Clone, Serialize, Deserialize)]
     pub enum Value {
@@ -71,9 +76,15 @@ pub mod properties {
     pub struct PropertyStore {
         /// Dense properties: PropertyID -> Vector of Values (indexed by NodeID)
         pub dense_columns: HashMap<u16, Vec<Option<Value>>>,
-        
+
         /// Sparse properties: NodeID -> PropertyID -> Value
         pub sparse_props: HashMap<u32, HashMap<u16, Value>>,
+    }
+
+    impl Default for PropertyStore {
+        fn default() -> Self {
+            Self::new()
+        }
     }
 
     impl PropertyStore {
@@ -83,7 +94,7 @@ pub mod properties {
                 sparse_props: HashMap::new(),
             }
         }
-        
+
         pub fn get_property(&self, node_id: u32, prop_id: u16) -> Option<&Value> {
             // Check dense first
             if let Some(col) = self.dense_columns.get(&prop_id) {
@@ -91,14 +102,16 @@ pub mod properties {
                     return Some(val);
                 }
             }
-            
+
             // Check sparse
-            self.sparse_props.get(&node_id).and_then(|props| props.get(&prop_id))
+            self.sparse_props
+                .get(&node_id)
+                .and_then(|props| props.get(&prop_id))
         }
     }
 }
 
-pub mod server;
 pub mod mcp;
 pub mod mcp_stdio;
 pub mod persistence;
+pub mod server;

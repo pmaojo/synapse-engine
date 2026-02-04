@@ -1,5 +1,5 @@
 use crate::server::MySemanticEngine;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::sync::Arc;
 
 /// Request payload for the `query_knowledge_graph` tool.
@@ -19,12 +19,12 @@ pub struct AddObservationParams {
 /// The MCP Server adapter.
 /// Wraps the Semantic Engine and exposes it via standard MCP tool interfaces.
 pub struct McpServer {
-    engine: Arc<MySemanticEngine>,
+    _engine: Arc<MySemanticEngine>,
 }
 
 impl McpServer {
     pub fn new(engine: Arc<MySemanticEngine>) -> Self {
-        Self { engine }
+        Self { _engine: engine }
     }
 
     /// Lists the tools available in this MCP server.
@@ -38,7 +38,11 @@ impl McpServer {
 
     /// Handles a tool call.
     /// In a real implementation, this would parse JSON-RPC requests.
-    pub async fn call_tool(&self, tool_name: &str, arguments: serde_json::Value) -> Result<serde_json::Value, String> {
+    pub async fn call_tool(
+        &self,
+        tool_name: &str,
+        arguments: serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
         match tool_name {
             "query_knowledge_graph" => {
                 let params: QueryGraphParams = serde_json::from_value(arguments)
@@ -54,7 +58,10 @@ impl McpServer {
         }
     }
 
-    async fn query_knowledge_graph(&self, params: QueryGraphParams) -> Result<serde_json::Value, String> {
+    async fn query_knowledge_graph(
+        &self,
+        _params: QueryGraphParams,
+    ) -> Result<serde_json::Value, String> {
         // Bridge to the internal engine
         // For now, just returning a mock response
         Ok(serde_json::json!({
@@ -64,7 +71,10 @@ impl McpServer {
         }))
     }
 
-    async fn add_observation(&self, params: AddObservationParams) -> Result<serde_json::Value, String> {
+    async fn add_observation(
+        &self,
+        _params: AddObservationParams,
+    ) -> Result<serde_json::Value, String> {
         // Bridge to internal engine ingestion
         Ok(serde_json::json!({
             "status": "success",

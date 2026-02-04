@@ -1,8 +1,10 @@
-use tonic::transport::Server;
-use semantic_engine::server::{MySemanticEngine, semantic_engine::semantic_engine_server::SemanticEngineServer};
-use semantic_engine::mcp_stdio::run_mcp_stdio;
 use std::env;
 use std::sync::Arc;
+use synapse_core::mcp_stdio::run_mcp_stdio;
+use synapse_core::server::{
+    semantic_engine::semantic_engine_server::SemanticEngineServer, MySemanticEngine,
+};
+use tonic::transport::Server;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

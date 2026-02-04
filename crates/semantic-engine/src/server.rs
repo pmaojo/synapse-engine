@@ -1,13 +1,13 @@
-use tonic::{Request, Response, Status};
-use crate::topology::GraphTopology;
-use crate::properties::{PropertyStore, Value};
 use crate::persistence::GraphSnapshot;
-use tokio::sync::RwLock as AsyncRwLock; // Alias for async RwLock
-use std::sync::RwLock; // Standard library RwLock
+use crate::properties::{PropertyStore, Value};
+use crate::topology::GraphTopology;
 use std::collections::HashMap;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicU32, AtomicU16, Ordering};
 use std::path::Path;
+use std::sync::atomic::{AtomicU16, AtomicU32, Ordering};
+use std::sync::Arc;
+use std::sync::RwLock; // Standard library RwLock
+use tokio::sync::RwLock as AsyncRwLock; // Alias for async RwLock
+use tonic::{Request, Response, Status};
 
 // Import the generated proto code
 pub mod semantic_engine {
@@ -15,18 +15,22 @@ pub mod semantic_engine {
 }
 
 use semantic_engine::semantic_engine_server::SemanticEngine;
-use semantic_engine::{IngestRequest, IngestResponse, NodeRequest, NeighborResponse, Neighbor, SearchRequest, SearchResponse, ResolveRequest, ResolveResponse, EmptyRequest, TriplesResponse, Triple, DeleteResponse, Provenance};
+use semantic_engine::{
+    DeleteResponse, EmptyRequest, IngestRequest, IngestResponse, Neighbor, NeighborResponse,
+    NodeRequest, Provenance, ResolveRequest, ResolveResponse, SearchRequest, SearchResponse,
+    Triple, TriplesResponse,
+};
 
 pub struct TenantGraph {
     pub tenant_id: String,
     pub topology: AsyncRwLock<GraphTopology>,
     pub properties: AsyncRwLock<PropertyStore>,
     pub edge_properties: AsyncRwLock<PropertyStore>,
-    
+
     // Node Dictionary (String <-> u32)
     pub dictionary: RwLock<HashMap<String, u32>>,
     pub reverse_dictionary: RwLock<HashMap<u32, String>>,
-    
+
     // Predicate Dictionary (String <-> u16)
     pub predicate_dictionary: RwLock<HashMap<String, u16>>,
     pub reverse_predicate_dictionary: RwLock<HashMap<u16, String>>,
@@ -72,13 +76,13 @@ impl TenantGraph {
         }
 
         let id = self.next_node_id.fetch_add(1, Ordering::Relaxed);
-        
+
         // Insert into reverse dictionary
         {
             let mut rev_dict = self.reverse_dictionary.write().unwrap();
             rev_dict.insert(id, name.to_string());
         }
-        
+
         dict.insert(name.to_string(), id);
         (id, true)
     }
@@ -117,10 +121,7 @@ impl TenantGraph {
 
         let nodes: Vec<(u32, String)> = {
             let rev_dict = self.reverse_dictionary.read().unwrap();
-            rev_dict
-                .iter()
-                .map(|(k, v)| (*k, v.clone()))
-                .collect()
+            rev_dict.iter().map(|(k, v)| (*k, v.clone())).collect()
         };
 
         let mut edges = Vec::new();
@@ -132,10 +133,7 @@ impl TenantGraph {
 
         let predicates: Vec<(u16, String)> = {
             let rev_dict = self.reverse_predicate_dictionary.read().unwrap();
-            rev_dict
-                .iter()
-                .map(|(k, v)| (*k, v.clone()))
-                .collect()
+            rev_dict.iter().map(|(k, v)| (*k, v.clone())).collect()
         };
 
         let edge_properties = self.edge_properties.read().await.clone();
@@ -178,15 +176,19 @@ impl TenantGraph {
                     max_pred_id = id;
                 }
             }
-            graph.next_predicate_id.store(max_pred_id + 1, Ordering::Relaxed);
+            graph
+                .next_predicate_id
+                .store(max_pred_id + 1, Ordering::Relaxed);
         }
 
         // Restore edge properties and next_edge_id
         {
-             let mut edge_props = graph.edge_properties.write().await;
-             *edge_props = snapshot.edge_properties;
+            let mut edge_props = graph.edge_properties.write().await;
+            *edge_props = snapshot.edge_properties;
         }
-        graph.next_edge_id.store(snapshot.next_edge_id, Ordering::Relaxed);
+        graph
+            .next_edge_id
+            .store(snapshot.next_edge_id, Ordering::Relaxed);
 
         // Restore topology
         let mut topo = graph.topology.write().await;
@@ -200,7 +202,7 @@ impl TenantGraph {
         for (s, o, p, e_id) in snapshot.edges {
             let max_curr = std::cmp::max(s, o);
             if max_curr as usize >= topo.num_nodes() {
-                 topo.ensure_capacity((max_curr + 1) as usize);
+                topo.ensure_capacity((max_curr + 1) as usize);
             }
             topo.add_edge(s, o, p, e_id);
         }
@@ -243,7 +245,11 @@ impl MySemanticEngine {
     // Helper to get a tenant graph (creating if not exists)
     async fn get_tenant_graph(&self, tenant_id: &str) -> Arc<TenantGraph> {
         // Default to "default" tenant if empty
-        let tid = if tenant_id.is_empty() { "default" } else { tenant_id };
+        let tid = if tenant_id.is_empty() {
+            "default"
+        } else {
+            tenant_id
+        };
 
         // Optimistic read
         {
@@ -280,23 +286,6 @@ impl MySemanticEngine {
 
         graph
     }
-
-    async fn save_tenant_graph(&self, tenant_id: &str) {
-        let tid = if tenant_id.is_empty() { "default" } else { tenant_id };
-
-        let graph_opt = {
-            let tenants = self.tenants.read().unwrap();
-            tenants.get(tid).cloned()
-        };
-
-        if let Some(graph) = graph_opt {
-            let snapshot = graph.to_snapshot().await;
-            let file_path = format!("{}/{}.bin", self.storage_path, tid);
-            if let Err(e) = snapshot.save_to_file(&file_path) {
-                println!("❌ Failed to save graph for {}: {}", tid, e);
-            }
-        }
-    }
 }
 
 #[tonic::async_trait]
@@ -332,26 +321,26 @@ impl SemanticEngine for MySemanticEngine {
             let edge_id = tenant_graph.next_edge_id.fetch_add(1, Ordering::Relaxed);
 
             if let Some(prov) = triple.provenance {
-                 // Store Source (Prop ID 1)
-                 let source_vec = edge_props.dense_columns.entry(1).or_insert_with(Vec::new);
-                 if source_vec.len() <= edge_id as usize {
-                     source_vec.resize(edge_id as usize + 1, None);
-                 }
-                 source_vec[edge_id as usize] = Some(Value::String(prov.source));
+                // Store Source (Prop ID 1)
+                let source_vec = edge_props.dense_columns.entry(1).or_insert_with(Vec::new);
+                if source_vec.len() <= edge_id as usize {
+                    source_vec.resize(edge_id as usize + 1, None);
+                }
+                source_vec[edge_id as usize] = Some(Value::String(prov.source));
 
-                 // Store Timestamp (Prop ID 2)
-                 let ts_vec = edge_props.dense_columns.entry(2).or_insert_with(Vec::new);
-                 if ts_vec.len() <= edge_id as usize {
-                     ts_vec.resize(edge_id as usize + 1, None);
-                 }
-                 ts_vec[edge_id as usize] = Some(Value::DateTime(prov.timestamp));
+                // Store Timestamp (Prop ID 2)
+                let ts_vec = edge_props.dense_columns.entry(2).or_insert_with(Vec::new);
+                if ts_vec.len() <= edge_id as usize {
+                    ts_vec.resize(edge_id as usize + 1, None);
+                }
+                ts_vec[edge_id as usize] = Some(Value::DateTime(prov.timestamp));
 
-                 // Store Method (Prop ID 3)
-                 let method_vec = edge_props.dense_columns.entry(3).or_insert_with(Vec::new);
-                 if method_vec.len() <= edge_id as usize {
-                     method_vec.resize(edge_id as usize + 1, None);
-                 }
-                 method_vec[edge_id as usize] = Some(Value::String(prov.method));
+                // Store Method (Prop ID 3)
+                let method_vec = edge_props.dense_columns.entry(3).or_insert_with(Vec::new);
+                if method_vec.len() <= edge_id as usize {
+                    method_vec.resize(edge_id as usize + 1, None);
+                }
+                method_vec[edge_id as usize] = Some(Value::String(prov.method));
             }
 
             // 4. Add Edge
@@ -376,7 +365,8 @@ impl SemanticEngine for MySemanticEngine {
                 if let Err(e) = snapshot.save_to_file(&file_path) {
                     println!("❌ Failed to save graph for {}: {}", tid, e);
                 }
-            }).await;
+            })
+            .await;
         });
 
         Ok(Response::new(IngestResponse {
@@ -393,18 +383,20 @@ impl SemanticEngine for MySemanticEngine {
         let tenant_graph = self.get_tenant_graph(&req.tenant_id).await;
 
         let topo = tenant_graph.topology.read().await;
-        
-        let neighbors = topo.neighbors(req.node_id)
+
+        let neighbors = topo
+            .neighbors(req.node_id)
             .map(|(n, t, _)| {
                 // Resolve Predicate ID to String Name
                 let rev_pred_dict = tenant_graph.reverse_predicate_dictionary.read().unwrap();
-                let edge_name = rev_pred_dict.get(&t)
+                let edge_name = rev_pred_dict
+                    .get(&t)
                     .cloned()
                     .unwrap_or_else(|| format!("Predicate_{}", t));
-                
+
                 Neighbor {
                     node_id: n,
-                    edge_type: edge_name, 
+                    edge_type: edge_name,
                 }
             })
             .collect();
@@ -426,7 +418,7 @@ impl SemanticEngine for MySemanticEngine {
     ) -> Result<Response<ResolveResponse>, Status> {
         let req = request.into_inner();
         let tenant_graph = self.get_tenant_graph(&req.tenant_id).await;
-        
+
         // Optimistic read
         let id_opt = {
             let dict = tenant_graph.dictionary.read().unwrap();
@@ -445,7 +437,7 @@ impl SemanticEngine for MySemanticEngine {
             }))
         }
     }
-    
+
     async fn get_all_triples(
         &self,
         request: Request<EmptyRequest>,
@@ -456,47 +448,69 @@ impl SemanticEngine for MySemanticEngine {
         let topo = tenant_graph.topology.read().await;
         let edge_props = tenant_graph.edge_properties.read().await;
         let mut triples = Vec::new();
-        
+
         // Iterate through all nodes and their edges
         for node_id in 0..topo.num_nodes() as u32 {
             for (neighbor_id, predicate_id, edge_id) in topo.neighbors(node_id) {
                 // Resolve IDs to strings
                 let subject = {
                     let rev_dict = tenant_graph.reverse_dictionary.read().unwrap();
-                    rev_dict.get(&node_id)
+                    rev_dict
+                        .get(&node_id)
                         .cloned()
                         .unwrap_or_else(|| format!("Node_{}", node_id))
                 };
-                
+
                 let object = {
                     let rev_dict = tenant_graph.reverse_dictionary.read().unwrap();
-                    rev_dict.get(&neighbor_id)
+                    rev_dict
+                        .get(&neighbor_id)
                         .cloned()
                         .unwrap_or_else(|| format!("Node_{}", neighbor_id))
                 };
-                
+
                 let predicate = {
                     let rev_pred_dict = tenant_graph.reverse_predicate_dictionary.read().unwrap();
-                    rev_pred_dict.get(&predicate_id)
+                    rev_pred_dict
+                        .get(&predicate_id)
                         .cloned()
                         .unwrap_or_else(|| format!("Predicate_{}", predicate_id))
                 };
-                
+
                 // Get Provenance
                 // 1: source, 2: timestamp, 3: method
-                let source = edge_props.get_property(edge_id, 1).and_then(|v| match v { Value::String(s) => Some(s.clone()), _ => None }).unwrap_or_default();
-                let timestamp = edge_props.get_property(edge_id, 2).and_then(|v| match v { Value::DateTime(s) => Some(s.clone()), _ => None }).unwrap_or_default();
-                let method = edge_props.get_property(edge_id, 3).and_then(|v| match v { Value::String(s) => Some(s.clone()), _ => None }).unwrap_or_default();
-
-                let provenance = if !source.is_empty() || !timestamp.is_empty() || !method.is_empty() {
-                    Some(Provenance {
-                        source,
-                        timestamp,
-                        method,
+                let source = edge_props
+                    .get_property(edge_id, 1)
+                    .and_then(|v| match v {
+                        Value::String(s) => Some(s.clone()),
+                        _ => None,
                     })
-                } else {
-                    None
-                };
+                    .unwrap_or_default();
+                let timestamp = edge_props
+                    .get_property(edge_id, 2)
+                    .and_then(|v| match v {
+                        Value::DateTime(s) => Some(s.clone()),
+                        _ => None,
+                    })
+                    .unwrap_or_default();
+                let method = edge_props
+                    .get_property(edge_id, 3)
+                    .and_then(|v| match v {
+                        Value::String(s) => Some(s.clone()),
+                        _ => None,
+                    })
+                    .unwrap_or_default();
+
+                let provenance =
+                    if !source.is_empty() || !timestamp.is_empty() || !method.is_empty() {
+                        Some(Provenance {
+                            source,
+                            timestamp,
+                            method,
+                        })
+                    } else {
+                        None
+                    };
 
                 triples.push(Triple {
                     subject,
@@ -506,7 +520,7 @@ impl SemanticEngine for MySemanticEngine {
                 });
             }
         }
-        
+
         Ok(Response::new(TriplesResponse { triples }))
     }
 
@@ -518,7 +532,7 @@ impl SemanticEngine for MySemanticEngine {
         let tenant_id = req.tenant_id;
 
         if tenant_id.is_empty() {
-             return Ok(Response::new(DeleteResponse {
+            return Ok(Response::new(DeleteResponse {
                 success: false,
                 message: "Tenant ID required".to_string(),
             }));
@@ -544,7 +558,7 @@ impl SemanticEngine for MySemanticEngine {
                 })),
             }
         } else {
-             Ok(Response::new(DeleteResponse {
+            Ok(Response::new(DeleteResponse {
                 success: true,
                 message: "Tenant data not found (already clean)".to_string(),
             }))
