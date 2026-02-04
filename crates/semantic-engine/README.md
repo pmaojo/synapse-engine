@@ -8,7 +8,7 @@
 
 **A high-performance neuro-symbolic semantic engine designed for agentic AI.**
 
-[Features](#-features) • [Installation](#-installation) • [Usage](#-usage) • [Architecture](#-architecture)
+[Features](#-features) • [Installation](#-installation) • [Usage](#-usage) • [API Reference](#-api-reference) • [Architecture](#-architecture)
 
 </div>
 
@@ -16,31 +16,47 @@
 
 ## 📖 Overview
 
-**Synapse Core** provides the foundational semantic memory layer for AI agents. It combines the structured precision of **Knowledge Graphs** (using [Oxigraph](https://github.com/oxigraph/oxigraph)) with the flexibility of **Vector Stores**, allowing agents to reason about data, maintain long-term context, and deduce new information automatically.
+**Synapse Core** provides the foundational semantic memory layer for AI agents. It combines the structured precision of **Knowledge Graphs** (using [Oxigraph](https://github.com/oxigraph/oxigraph)) with **RDF/SPARQL** standards, allowing agents to reason about data, maintain long-term context, and query knowledge using industry-standard semantic web technologies.
 
 It is designed to work seamlessly with **OpenClaw** and other agentic frameworks via the **Model Context Protocol (MCP)** or as a standalone **gRPC service**.
 
 ## 🚀 Features
 
-- **Neuro-Symbolic Engine**: Hybrid architecture merging graph databases (RDF/SPARQL) with semantic vector search.
-- **Reasoning Capabilities**: Built-in support for OWL reasoning via `reasonable`, enabling automatic deduction of facts.
-- **MCP Support**: Native implementation of the Model Context Protocol for easy integration with LLM agents.
-- **High Performance**: Written in Rust for minimal latency and maximum throughput.
-- **Namespace Isolation**: Support for multiple isolated knowledge bases (e.g., "work", "personal").
+- **RDF Triple Store**: Built on Oxigraph for standards-compliant RDF storage and querying
+- **SPARQL Support**: Full SPARQL 1.1 query language support for complex graph queries
+- **Multi-Namespace Architecture**: Isolated knowledge bases for different contexts (work, personal, projects)
+- **Dual Protocol Support**:
+  - **gRPC API** for high-performance programmatic access
+  - **MCP Server** for seamless LLM agent integration
+- **OWL Reasoning**: Built-in support for OWL RL reasoning via `reasonable` (deductive inference)
+- **High Performance**: Written in Rust with async I/O for minimal latency
+- **Persistent Storage**: Automatic persistence with namespace-specific storage paths
 
 ## 📦 Installation
 
-To use `synapse-core` in your Rust project:
+### As a Rust Library
+
+Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
 synapse-core = "0.2.0"
 ```
 
-To install the binary CLI:
+### As a Binary
+
+Install the CLI tool:
 
 ```bash
 cargo install synapse-core
+```
+
+### For OpenClaw
+
+One-click install as an MCP server:
+
+```bash
+npx skills install pmaojo/synapse-engine
 ```
 
 ## 🛠️ Usage
@@ -50,46 +66,241 @@ cargo install synapse-core
 Run Synapse as a high-performance gRPC server:
 
 ```bash
-# Start the server (default port 50051)
+# Start the server (default: localhost:50051)
 synapse
+
+# With custom storage path
+GRAPH_STORAGE_PATH=/path/to/data synapse
 ```
 
-Configuration via environment variables:
+The gRPC server exposes 7 RPC methods for semantic operations (see [API Reference](#-api-reference)).
 
-- `GRAPH_STORAGE_PATH`: Directory to persist graph data (default: `data/graphs`).
+### 2. Model Context Protocol (MCP) Server
 
-### 2. Model Context Protocol (MCP)
-
-Synapse is designed to plug directly into agents like **OpenClaw** or IDEs like **Cursor** via MCP (stdio mode).
+Run in MCP mode for integration with LLM agents:
 
 ```bash
-# Start in MCP mode
 synapse --mcp
 ```
 
-### 3. Rust Library
+This exposes 3 MCP tools via JSON-RPC over stdio:
+
+- `query_graph` - Retrieve all triples from a namespace
+- `ingest_triple` - Add a new triple to the knowledge graph
+- `query_sparql` - Execute SPARQL queries
+
+### 3. Rust Library Integration
 
 Embed the engine directly into your application:
 
 ```rust
 use synapse_core::server::MySemanticEngine;
-use std::sync::Arc;
+use synapse_core::server::semantic_engine::*;
+use tonic::Request;
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Initialize the engine
     let engine = MySemanticEngine::new("data/my_graph");
 
-    // Use the engine instance...
+    // Ingest triples
+    let triple = Triple {
+        subject: "Alice".to_string(),
+        predicate: "knows".to_string(),
+        object: "Bob".to_string(),
+        provenance: None,
+    };
+
+    let request = IngestRequest {
+        triples: vec![triple],
+        namespace: "social".to_string(),
+    };
+
+    let response = engine.ingest_triples(Request::new(request)).await?;
+    println!("Added {} triples", response.into_inner().nodes_added);
+
+    Ok(())
+}
+```
+
+### 4. SPARQL Queries
+
+Query your knowledge graph using SPARQL:
+
+```rust
+use synapse_core::server::semantic_engine::SparqlRequest;
+
+let sparql_query = r#"
+    SELECT ?subject ?predicate ?object
+    WHERE {
+        ?subject ?predicate ?object .
+    }
+    LIMIT 10
+"#;
+
+let request = SparqlRequest {
+    query: sparql_query.to_string(),
+    namespace: "default".to_string(),
+};
+
+let response = engine.query_sparql(Request::new(request)).await?;
+println!("Results: {}", response.into_inner().results_json);
+```
+
+### 5. Multi-Namespace Usage
+
+Isolate different knowledge domains:
+
+```rust
+// Work-related knowledge
+engine.ingest_triples(Request::new(IngestRequest {
+    triples: work_triples,
+    namespace: "work".to_string(),
+})).await?;
+
+// Personal knowledge
+engine.ingest_triples(Request::new(IngestRequest {
+    triples: personal_triples,
+    namespace: "personal".to_string(),
+})).await?;
+
+// Query specific namespace
+let work_data = engine.get_all_triples(Request::new(EmptyRequest {
+    namespace: "work".to_string(),
+})).await?;
+```
+
+## 📚 API Reference
+
+### gRPC API
+
+The `SemanticEngine` service provides the following RPC methods:
+
+| Method                | Request          | Response           | Description                                    |
+| --------------------- | ---------------- | ------------------ | ---------------------------------------------- |
+| `IngestTriples`       | `IngestRequest`  | `IngestResponse`   | Add RDF triples to the graph                   |
+| `GetNeighbors`        | `NodeRequest`    | `NeighborResponse` | Graph traversal (get connected nodes)          |
+| `Search`              | `SearchRequest`  | `SearchResponse`   | Vector search (placeholder for hybrid queries) |
+| `ResolveId`           | `ResolveRequest` | `ResolveResponse`  | Resolve URI string to internal node ID         |
+| `GetAllTriples`       | `EmptyRequest`   | `TriplesResponse`  | Retrieve all triples from a namespace          |
+| `QuerySparql`         | `SparqlRequest`  | `SparqlResponse`   | Execute SPARQL 1.1 queries                     |
+| `DeleteNamespaceData` | `EmptyRequest`   | `DeleteResponse`   | Delete all data in a namespace                 |
+
+**Proto Definition**: See [`semantic_engine.proto`](https://github.com/pmaojo/synapse-engine/blob/main/crates/semantic-engine/proto/semantic_engine.proto)
+
+### MCP Tools
+
+When running in `--mcp` mode, the following tools are exposed:
+
+#### `query_graph`
+
+Retrieve all triples from a namespace.
+
+**Input Schema:**
+
+```json
+{
+  "namespace": "string (default: robin_os)"
+}
+```
+
+#### `ingest_triple`
+
+Add a new RDF triple to the knowledge graph.
+
+**Input Schema:**
+
+```json
+{
+  "subject": "string (required)",
+  "predicate": "string (required)",
+  "object": "string (required)",
+  "namespace": "string (default: robin_os)"
+}
+```
+
+#### `query_sparql`
+
+Execute a SPARQL query on the knowledge graph.
+
+**Input Schema:**
+
+```json
+{
+  "query": "string (required)",
+  "namespace": "string (default: robin_os)"
 }
 ```
 
 ## 🏗️ Architecture
 
-Synapse is built on a robust stack:
+### Storage Layer
 
-- **Storage**: [Oxigraph](https://github.com/oxigraph/oxigraph) for RDF triple storage and SPARQL querying.
-- **Reasoning**: [Reasonable](https://github.com/gtfierro/reasonable) for OWL RL reasoning.
-- **Transport**: [Tonic](https://github.com/hyperium/tonic) for gRPC and [Tokio](https://tokio.rs) for async runtime.
+- **Oxigraph**: RDF triple store with SPARQL 1.1 support
+- **Namespace Isolation**: Each namespace gets its own persistent storage directory
+- **URI Mapping**: Automatic conversion between URIs and internal node IDs for gRPC compatibility
+
+### Reasoning Engine
+
+- **Reasonable**: OWL RL reasoning for automatic inference
+- **Deductive Capabilities**: Derive new facts from existing triples using ontological rules
+
+### Dual-Mode Operation
+
+```
+┌─────────────────────────────────────┐
+│      Synapse Core Engine            │
+├─────────────────────────────────────┤
+│                                     │
+│  ┌──────────────┐  ┌─────────────┐ │
+│  │  gRPC Server │  │  MCP Server │ │
+│  │  (Port 50051)│  │  (stdio)    │ │
+│  └──────┬───────┘  └──────┬──────┘ │
+│         │                 │         │
+│         └────────┬────────┘         │
+│                  │                  │
+│         ┌────────▼────────┐         │
+│         │ MySemanticEngine│         │
+│         └────────┬────────┘         │
+│                  │                  │
+│         ┌────────▼────────┐         │
+│         │  SynapseStore   │         │
+│         │  (per namespace)│         │
+│         └────────┬────────┘         │
+│                  │                  │
+│         ┌────────▼────────┐         │
+│         │   Oxigraph RDF  │         │
+│         │   Triple Store  │         │
+│         └─────────────────┘         │
+└─────────────────────────────────────┘
+```
+
+### Namespace Management
+
+Each namespace is completely isolated with its own:
+
+- Storage directory (`{GRAPH_STORAGE_PATH}/{namespace}`)
+- Oxigraph store instance
+- URI-to-ID mapping tables
+
+This enables multi-tenant scenarios and context separation.
+
+## ⚙️ Configuration
+
+### Environment Variables
+
+| Variable             | Default       | Description                          |
+| -------------------- | ------------- | ------------------------------------ |
+| `GRAPH_STORAGE_PATH` | `data/graphs` | Root directory for namespace storage |
+
+### Storage Structure
+
+```
+data/graphs/
+├── default/          # Default namespace
+├── work/             # Work namespace
+└── personal/         # Personal namespace
+```
 
 ## 🤝 Contributing
 
@@ -98,3 +309,7 @@ Contributions are welcome! Please check the [repository](https://github.com/pmao
 ## 📄 License
 
 This project is licensed under the [MIT License](LICENSE).
+
+---
+
+**Built with ❤️ using Rust, Oxigraph, and Tonic**
