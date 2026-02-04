@@ -1,2 +1,1 @@
-{"text": "El pastoreo rotacional mejora la salud de las praderas y secuestra carbono.", "triples": [["RotationalGrazing", "improves", "PastureHealth"], ["RotationalGrazing", "sequesters", "Carbon"]], "domain": "agriculture"}
-{"text": "Los bancos de semillas comunitarios preservan variedades locales y promueven la biodiversidad.", "triples": [["CommunitySeedBank", "preserves", "LocalVarieties"], ["CommunitySeedBank", "promotes", "Biodiversity"]], "domain": "agriculture"}
+{"text": "Rust is fast.", "triples": [["Rust", "is", "Fast"]], "domain": "general"}

@@ -92,7 +92,7 @@ class DIContainer:
         from agents.domain.services.ontology import OntologyService
         if "ontology_service" not in self._services:
             # Load default ontologies
-            self._services["ontology_service"] = OntologyService(["ontology/core.owl", "ontology/agriculture.owl"])
+            self._services["ontology_service"] = OntologyService(["ontology/core.owl", "ontology/frontend.owl"])
         return self._services["ontology_service"]
 
     def reasoning_engine(self):
