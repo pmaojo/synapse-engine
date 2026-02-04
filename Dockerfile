@@ -1,4 +1,4 @@
-FROM rust:1.80-slim as builder
+FROM rust:1.83-slim as builder
 RUN apt-get update && apt-get install -y protobuf-compiler pkg-config libssl-dev
 WORKDIR /usr/src/synapse
 COPY . .
