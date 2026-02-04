@@ -17,8 +17,20 @@ service SemanticEngine {
     // Get all stored triples (for graph visualization)
     rpc GetAllTriples (EmptyRequest) returns (TriplesResponse);
 
+    // Executes a SPARQL query
+    rpc QuerySparql (SparqlRequest) returns (SparqlResponse);
+
     // Deletes all data associated with a namespace
     rpc DeleteNamespaceData (EmptyRequest) returns (DeleteResponse);
+}
+
+message SparqlRequest {
+    string query = 1;
+    string namespace = 2;
+}
+
+message SparqlResponse {
+    string results_json = 1;
 }
 
 message DeleteResponse {

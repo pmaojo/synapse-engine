@@ -67,6 +67,18 @@ pub async fn run_mcp_stdio(
                                 },
                                 "required": ["subject", "predicate", "object"]
                             }
+                        },
+                        {
+                            "name": "query_sparql",
+                            "description": "Ejecuta una consulta SPARQL sobre el grafo",
+                            "inputSchema": {
+                                "type": "object",
+                                "properties": {
+                                    "query": { "type": "string" },
+                                    "namespace": { "type": "string", "default": "robin_os" }
+                                },
+                                "required": ["query"]
+                            }
                         }
                     ]
                 }
@@ -130,6 +142,27 @@ pub async fn run_mcp_stdio(
                             "id": request.id,
                             "result": {
                                 "content": [{ "type": "text", "text": format!("Triple ({}, {}, {}) ingerido correctamente en Synapse", sub, pred, obj) }]
+                            }
+                        })
+                    }
+                    "query_sparql" => {
+                        let query = args["query"].as_str().unwrap_or("");
+                        let namespace = args["namespace"].as_str().unwrap_or("robin_os");
+
+                        let res = engine
+                            .query_sparql(tonic::Request::new(
+                                crate::server::semantic_engine::SparqlRequest {
+                                    query: query.to_string(),
+                                    namespace: namespace.to_string(),
+                                },
+                            ))
+                            .await?;
+
+                        json!({
+                            "jsonrpc": "2.0",
+                            "id": request.id,
+                            "result": {
+                                "content": [{ "type": "text", "text": res.into_inner().results_json }]
                             }
                         })
                     }

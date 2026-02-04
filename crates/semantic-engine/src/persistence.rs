@@ -1,4 +1,3 @@
-use crate::properties::PropertyStore;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
@@ -8,7 +7,6 @@ pub struct GraphSnapshot {
     pub nodes: Vec<(u32, String)>,        // (id, name)
     pub edges: Vec<(u32, u32, u16, u32)>, // (from, to, predicate_id, edge_id)
     pub predicates: Vec<(u16, String)>,   // (id, name)
-    pub edge_properties: PropertyStore,
     pub next_edge_id: u32,
 }
 
@@ -26,14 +24,11 @@ impl GraphSnapshot {
                 nodes: Vec::new(),
                 edges: Vec::new(),
                 predicates: Vec::new(),
-                edge_properties: PropertyStore::new(),
                 next_edge_id: 0,
             });
         }
 
         let data = fs::read(path)?;
-        // Try deserializing, if it fails, it might be the old format.
-        // For this task, we assume we can break format or just return error.
         let snapshot: GraphSnapshot = bincode::deserialize(&data).map_err(std::io::Error::other)?;
         println!("📂 Graph loaded from {}", path);
         Ok(snapshot)

@@ -1,5 +1,5 @@
 FROM rust:1.83-slim as builder
-RUN apt-get update && apt-get install -y protobuf-compiler pkg-config libssl-dev
+RUN apt-get update && apt-get install -y protobuf-compiler pkg-config libssl-dev clang libclang-dev
 WORKDIR /usr/src/synapse
 COPY . .
 RUN cargo build --release -p synapse-core

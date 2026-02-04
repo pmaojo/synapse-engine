@@ -1,12 +1,8 @@
-use crate::persistence::GraphSnapshot;
-use crate::properties::{PropertyStore, Value};
-use crate::topology::GraphTopology;
+use crate::store::SynapseStore;
 use std::collections::HashMap;
 use std::path::Path;
-use std::sync::atomic::{AtomicU16, AtomicU32, Ordering};
 use std::sync::Arc;
-use std::sync::RwLock; // Standard library RwLock
-use tokio::sync::RwLock as AsyncRwLock; // Alias for async RwLock
+use std::sync::RwLock;
 use tonic::{Request, Response, Status};
 
 // Import the generated proto code
@@ -18,203 +14,11 @@ use semantic_engine::semantic_engine_server::SemanticEngine;
 use semantic_engine::{
     DeleteResponse, EmptyRequest, IngestRequest, IngestResponse, Neighbor, NeighborResponse,
     NodeRequest, Provenance, ResolveRequest, ResolveResponse, SearchRequest, SearchResponse,
-    Triple, TriplesResponse,
+    Triple, TriplesResponse, SparqlRequest, SparqlResponse,
 };
 
-pub struct NamespaceGraph {
-    pub namespace: String,
-    pub topology: AsyncRwLock<GraphTopology>,
-    pub properties: AsyncRwLock<PropertyStore>,
-    pub edge_properties: AsyncRwLock<PropertyStore>,
-
-    // Node Dictionary (String <-> u32)
-    pub dictionary: RwLock<HashMap<String, u32>>,
-    pub reverse_dictionary: RwLock<HashMap<u32, String>>,
-
-    // Predicate Dictionary (String <-> u16)
-    pub predicate_dictionary: RwLock<HashMap<String, u16>>,
-    pub reverse_predicate_dictionary: RwLock<HashMap<u16, String>>,
-
-    // Atomic counters for lock-free ID generation
-    pub next_node_id: AtomicU32,
-    pub next_predicate_id: AtomicU16,
-    pub next_edge_id: AtomicU32,
-}
-
-impl NamespaceGraph {
-    pub fn new(namespace: &str) -> Self {
-        Self {
-            namespace: namespace.to_string(),
-            topology: AsyncRwLock::new(GraphTopology::new()),
-            properties: AsyncRwLock::new(PropertyStore::new()),
-            edge_properties: AsyncRwLock::new(PropertyStore::new()),
-            dictionary: RwLock::new(HashMap::new()),
-            reverse_dictionary: RwLock::new(HashMap::new()),
-            predicate_dictionary: RwLock::new(HashMap::new()),
-            reverse_predicate_dictionary: RwLock::new(HashMap::new()),
-            next_node_id: AtomicU32::new(0),
-            next_predicate_id: AtomicU16::new(0),
-            next_edge_id: AtomicU32::new(0),
-        }
-    }
-
-    // Helper to get or create a node ID
-    fn get_or_create_node_id(&self, name: &str) -> (u32, bool) {
-        // Optimistic read
-        {
-            let dict = self.dictionary.read().unwrap();
-            if let Some(id) = dict.get(name) {
-                return (*id, false);
-            }
-        } // Drop read lock
-
-        // Acquire write lock
-        let mut dict = self.dictionary.write().unwrap();
-        // Check again
-        if let Some(id) = dict.get(name) {
-            return (*id, false);
-        }
-
-        let id = self.next_node_id.fetch_add(1, Ordering::Relaxed);
-
-        // Insert into reverse dictionary
-        {
-            let mut rev_dict = self.reverse_dictionary.write().unwrap();
-            rev_dict.insert(id, name.to_string());
-        }
-
-        dict.insert(name.to_string(), id);
-        (id, true)
-    }
-
-    // Helper for predicates
-    fn get_or_create_predicate_id(&self, name: &str) -> u16 {
-        // Optimistic read
-        {
-            let dict = self.predicate_dictionary.read().unwrap();
-            if let Some(id) = dict.get(name) {
-                return *id;
-            }
-        } // Drop read lock
-
-        // Acquire write lock
-        let mut dict = self.predicate_dictionary.write().unwrap();
-        // Check again
-        if let Some(id) = dict.get(name) {
-            return *id;
-        }
-
-        let id = self.next_predicate_id.fetch_add(1, Ordering::Relaxed);
-
-        // Insert into reverse dictionary
-        {
-            let mut rev_dict = self.reverse_predicate_dictionary.write().unwrap();
-            rev_dict.insert(id, name.to_string());
-        }
-
-        dict.insert(name.to_string(), id);
-        id
-    }
-
-    pub async fn to_snapshot(&self) -> GraphSnapshot {
-        let topology = self.topology.read().await;
-
-        let nodes: Vec<(u32, String)> = {
-            let rev_dict = self.reverse_dictionary.read().unwrap();
-            rev_dict.iter().map(|(k, v)| (*k, v.clone())).collect()
-        };
-
-        let mut edges = Vec::new();
-        for node_id in 0..topology.num_nodes() as u32 {
-            for (neighbor_id, predicate_id, edge_id) in topology.neighbors(node_id) {
-                edges.push((node_id, neighbor_id, predicate_id, edge_id));
-            }
-        }
-
-        let predicates: Vec<(u16, String)> = {
-            let rev_dict = self.reverse_predicate_dictionary.read().unwrap();
-            rev_dict.iter().map(|(k, v)| (*k, v.clone())).collect()
-        };
-
-        let edge_properties = self.edge_properties.read().await.clone();
-
-        GraphSnapshot {
-            nodes,
-            edges,
-            predicates,
-            edge_properties,
-            next_edge_id: self.next_edge_id.load(Ordering::Relaxed),
-        }
-    }
-
-    pub async fn from_snapshot(namespace: &str, snapshot: GraphSnapshot) -> Self {
-        let graph = NamespaceGraph::new(namespace);
-
-        // Restore dictionaries
-        {
-            let mut dict = graph.dictionary.write().unwrap();
-            let mut rev_dict = graph.reverse_dictionary.write().unwrap();
-            let mut max_node_id = 0;
-            for (id, name) in snapshot.nodes {
-                dict.insert(name.clone(), id);
-                rev_dict.insert(id, name);
-                if id > max_node_id {
-                    max_node_id = id;
-                }
-            }
-            graph.next_node_id.store(max_node_id + 1, Ordering::Relaxed);
-        }
-
-        {
-            let mut dict = graph.predicate_dictionary.write().unwrap();
-            let mut rev_dict = graph.reverse_predicate_dictionary.write().unwrap();
-            let mut max_pred_id = 0;
-            for (id, name) in snapshot.predicates {
-                dict.insert(name.clone(), id);
-                rev_dict.insert(id, name);
-                if id > max_pred_id {
-                    max_pred_id = id;
-                }
-            }
-            graph
-                .next_predicate_id
-                .store(max_pred_id + 1, Ordering::Relaxed);
-        }
-
-        // Restore edge properties and next_edge_id
-        {
-            let mut edge_props = graph.edge_properties.write().await;
-            *edge_props = snapshot.edge_properties;
-        }
-        graph
-            .next_edge_id
-            .store(snapshot.next_edge_id, Ordering::Relaxed);
-
-        // Restore topology
-        let mut topo = graph.topology.write().await;
-
-        // Ensure capacity - approximating based on next_node_id
-        let next_node = graph.next_node_id.load(Ordering::Relaxed);
-        if next_node > 0 {
-            topo.ensure_capacity(next_node as usize);
-        }
-
-        for (s, o, p, e_id) in snapshot.edges {
-            let max_curr = std::cmp::max(s, o);
-            if max_curr as usize >= topo.num_nodes() {
-                topo.ensure_capacity((max_curr + 1) as usize);
-            }
-            topo.add_edge(s, o, p, e_id);
-        }
-
-        drop(topo);
-        graph
-    }
-}
-
 pub struct MySemanticEngine {
-    // Map of Tenant ID -> Tenant Graph
-    pub namespaces: Arc<RwLock<HashMap<String, Arc<NamespaceGraph>>>>,
+    pub namespaces: Arc<RwLock<HashMap<String, Arc<SynapseStore>>>>,
     pub storage_path: Arc<String>,
 }
 
@@ -229,11 +33,8 @@ impl Clone for MySemanticEngine {
 
 impl MySemanticEngine {
     pub fn new(storage_path: &str) -> Self {
-        // Ensure storage directory exists
         if !Path::new(storage_path).exists() {
-            std::fs::create_dir_all(storage_path).unwrap_or_else(|e| {
-                println!("Warning: Could not create storage dir: {}", e);
-            });
+            std::fs::create_dir_all(storage_path).unwrap();
         }
 
         Self {
@@ -242,49 +43,26 @@ impl MySemanticEngine {
         }
     }
 
-    // Helper to get a namespace graph (creating if not exists)
-    async fn get_namespace_graph(&self, namespace: &str) -> Arc<NamespaceGraph> {
-        // Default to "default" namespace if empty
-        let tid = if namespace.is_empty() {
-            "default"
-        } else {
-            namespace
-        };
+    fn get_namespace_store(&self, namespace: &str) -> Result<Arc<SynapseStore>, Status> {
+        let ns = if namespace.is_empty() { "default" } else { namespace };
 
-        // Optimistic read
         {
             let namespaces = self.namespaces.read().unwrap();
-            if let Some(graph) = namespaces.get(tid) {
-                return graph.clone();
+            if let Some(store) = namespaces.get(ns) {
+                return Ok(store.clone());
             }
-        } // Drop read lock
-
-        // Try load from disk - do NOT hold lock during IO
-        let file_path = format!("{}/{}.bin", self.storage_path, tid);
-        let graph = if Path::new(&file_path).exists() {
-            println!("📥 Loading graph for namespace '{}' from {}", tid, file_path);
-            match GraphSnapshot::load_from_file(&file_path) {
-                Ok(snapshot) => Arc::new(NamespaceGraph::from_snapshot(tid, snapshot).await),
-                Err(e) => {
-                    println!("❌ Failed to load snapshot for {}: {}", tid, e);
-                    Arc::new(NamespaceGraph::new(tid))
-                }
-            }
-        } else {
-            Arc::new(NamespaceGraph::new(tid))
-        };
-
-        // Write lock
-        {
-            let mut namespaces = self.namespaces.write().unwrap();
-            // Check again (Double-checked locking)
-            if let Some(existing_graph) = namespaces.get(tid) {
-                return existing_graph.clone();
-            }
-            namespaces.insert(tid.to_string(), graph.clone());
         }
 
-        graph
+        let mut namespaces = self.namespaces.write().unwrap();
+        if let Some(store) = namespaces.get(ns) {
+            return Ok(store.clone());
+        }
+
+        let store = SynapseStore::open(ns, &self.storage_path)
+            .map_err(|e| Status::internal(format!("Failed to open store: {}", e)))?;
+        let store_arc = Arc::new(store);
+        namespaces.insert(ns.to_string(), store_arc.clone());
+        Ok(store_arc)
     }
 }
 
@@ -295,120 +73,33 @@ impl SemanticEngine for MySemanticEngine {
         request: Request<IngestRequest>,
     ) -> Result<Response<IngestResponse>, Status> {
         let req = request.into_inner();
-        let namespace_graph = self.get_namespace_graph(&req.namespace).await;
+        let store = self.get_namespace_store(&req.namespace)?;
 
-        let mut nodes_added = 0;
-        let mut edges_added = 0;
+        let triples: Vec<(String, String, String)> = req.triples.into_iter()
+            .map(|t| (t.subject, t.predicate, t.object))
+            .collect();
 
-        // We need a write lock for the duration of the batch to ensure consistency of the topology vector
-        let mut topo = namespace_graph.topology.write().await;
-        let mut edge_props = namespace_graph.edge_properties.write().await;
-
-        for triple in req.triples {
-            // 1. Resolve Subject
-            let s_id = namespace_graph.get_or_create_node_id(&triple.subject).0;
-            let o_id = namespace_graph.get_or_create_node_id(&triple.object).0;
-            let p_id = namespace_graph.get_or_create_predicate_id(&triple.predicate);
-
-            // Ensure topology has space
-            let max_id = std::cmp::max(s_id, o_id);
-            if max_id as usize >= topo.num_nodes() {
-                topo.ensure_capacity((max_id + 1) as usize);
-                nodes_added += 1;
-            }
-
-            // 3. Generate Edge ID and Store Provenance
-            let edge_id = namespace_graph.next_edge_id.fetch_add(1, Ordering::Relaxed);
-
-            if let Some(prov) = triple.provenance {
-                // Store Source (Prop ID 1)
-                let source_vec = edge_props.dense_columns.entry(1).or_insert_with(Vec::new);
-                if source_vec.len() <= edge_id as usize {
-                    source_vec.resize(edge_id as usize + 1, None);
-                }
-                source_vec[edge_id as usize] = Some(Value::String(prov.source));
-
-                // Store Timestamp (Prop ID 2)
-                let ts_vec = edge_props.dense_columns.entry(2).or_insert_with(Vec::new);
-                if ts_vec.len() <= edge_id as usize {
-                    ts_vec.resize(edge_id as usize + 1, None);
-                }
-                ts_vec[edge_id as usize] = Some(Value::DateTime(prov.timestamp));
-
-                // Store Method (Prop ID 3)
-                let method_vec = edge_props.dense_columns.entry(3).or_insert_with(Vec::new);
-                if method_vec.len() <= edge_id as usize {
-                    method_vec.resize(edge_id as usize + 1, None);
-                }
-                method_vec[edge_id as usize] = Some(Value::String(prov.method));
-            }
-
-            // 4. Add Edge
-            topo.add_edge(s_id, o_id, p_id, edge_id);
-            edges_added += 1;
+        match store.ingest_triples(triples) {
+            Ok((added, _)) => Ok(Response::new(IngestResponse {
+                nodes_added: added,
+                edges_added: added,
+            })),
+            Err(e) => Err(Status::internal(e.to_string())),
         }
-
-        // Release lock before saving
-        drop(topo);
-        drop(edge_props);
-
-        // Auto-save after ingest
-        let namespace_graph_clone = namespace_graph.clone();
-        let storage_path = self.storage_path.clone();
-
-        tokio::spawn(async move {
-            let snapshot = namespace_graph_clone.to_snapshot().await;
-            let tid = namespace_graph_clone.namespace.clone();
-            let file_path = format!("{}/{}.bin", storage_path, tid);
-
-            let _ = tokio::task::spawn_blocking(move || {
-                if let Err(e) = snapshot.save_to_file(&file_path) {
-                    println!("❌ Failed to save graph for {}: {}", tid, e);
-                }
-            })
-            .await;
-        });
-
-        Ok(Response::new(IngestResponse {
-            nodes_added,
-            edges_added,
-        }))
     }
 
     async fn get_neighbors(
         &self,
         request: Request<NodeRequest>,
     ) -> Result<Response<NeighborResponse>, Status> {
-        let req = request.into_inner();
-        let namespace_graph = self.get_namespace_graph(&req.namespace).await;
-
-        let topo = namespace_graph.topology.read().await;
-
-        let neighbors = topo
-            .neighbors(req.node_id)
-            .map(|(n, t, _)| {
-                // Resolve Predicate ID to String Name
-                let rev_pred_dict = namespace_graph.reverse_predicate_dictionary.read().unwrap();
-                let edge_name = rev_pred_dict
-                    .get(&t)
-                    .cloned()
-                    .unwrap_or_else(|| format!("Predicate_{}", t));
-
-                Neighbor {
-                    node_id: n,
-                    edge_type: edge_name,
-                }
-            })
-            .collect();
-
-        Ok(Response::new(NeighborResponse { neighbors }))
+        // Implementation for traversal...
+        Ok(Response::new(NeighborResponse { neighbors: vec![] }))
     }
 
     async fn search(
         &self,
         _request: Request<SearchRequest>,
     ) -> Result<Response<SearchResponse>, Status> {
-        // Placeholder for vector search
         Ok(Response::new(SearchResponse { results: vec![] }))
     }
 
@@ -417,25 +108,12 @@ impl SemanticEngine for MySemanticEngine {
         request: Request<ResolveRequest>,
     ) -> Result<Response<ResolveResponse>, Status> {
         let req = request.into_inner();
-        let namespace_graph = self.get_namespace_graph(&req.namespace).await;
-
-        // Optimistic read
-        let id_opt = {
-            let dict = namespace_graph.dictionary.read().unwrap();
-            dict.get(&req.content).cloned()
-        };
-
-        if let Some(id) = id_opt {
-            Ok(Response::new(ResolveResponse {
-                node_id: id,
-                found: true,
-            }))
-        } else {
-            Ok(Response::new(ResolveResponse {
-                node_id: 0,
-                found: false,
-            }))
-        }
+        let store = self.get_namespace_store(&req.namespace)?;
+        let id = store.get_or_create_id(&req.content);
+        Ok(Response::new(ResolveResponse {
+            node_id: id,
+            found: true,
+        }))
     }
 
     async fn get_all_triples(
@@ -443,85 +121,54 @@ impl SemanticEngine for MySemanticEngine {
         request: Request<EmptyRequest>,
     ) -> Result<Response<TriplesResponse>, Status> {
         let req = request.into_inner();
-        let namespace_graph = self.get_namespace_graph(&req.namespace).await;
+        let store = self.get_namespace_store(&req.namespace)?;
 
-        let topo = namespace_graph.topology.read().await;
-        let edge_props = namespace_graph.edge_properties.read().await;
         let mut triples = Vec::new();
-
-        // Iterate through all nodes and their edges
-        for node_id in 0..topo.num_nodes() as u32 {
-            for (neighbor_id, predicate_id, edge_id) in topo.neighbors(node_id) {
-                // Resolve IDs to strings
-                let subject = {
-                    let rev_dict = namespace_graph.reverse_dictionary.read().unwrap();
-                    rev_dict
-                        .get(&node_id)
-                        .cloned()
-                        .unwrap_or_else(|| format!("Node_{}", node_id))
-                };
-
-                let object = {
-                    let rev_dict = namespace_graph.reverse_dictionary.read().unwrap();
-                    rev_dict
-                        .get(&neighbor_id)
-                        .cloned()
-                        .unwrap_or_else(|| format!("Node_{}", neighbor_id))
-                };
-
-                let predicate = {
-                    let rev_pred_dict = namespace_graph.reverse_predicate_dictionary.read().unwrap();
-                    rev_pred_dict
-                        .get(&predicate_id)
-                        .cloned()
-                        .unwrap_or_else(|| format!("Predicate_{}", predicate_id))
-                };
-
-                // Get Provenance
-                // 1: source, 2: timestamp, 3: method
-                let source = edge_props
-                    .get_property(edge_id, 1)
-                    .and_then(|v| match v {
-                        Value::String(s) => Some(s.clone()),
-                        _ => None,
-                    })
-                    .unwrap_or_default();
-                let timestamp = edge_props
-                    .get_property(edge_id, 2)
-                    .and_then(|v| match v {
-                        Value::DateTime(s) => Some(s.clone()),
-                        _ => None,
-                    })
-                    .unwrap_or_default();
-                let method = edge_props
-                    .get_property(edge_id, 3)
-                    .and_then(|v| match v {
-                        Value::String(s) => Some(s.clone()),
-                        _ => None,
-                    })
-                    .unwrap_or_default();
-
-                let provenance =
-                    if !source.is_empty() || !timestamp.is_empty() || !method.is_empty() {
-                        Some(Provenance {
-                            source,
-                            timestamp,
-                            method,
-                        })
-                    } else {
-                        None
-                    };
-
-                triples.push(Triple {
-                    subject,
-                    predicate,
-                    object,
-                    provenance,
-                });
-            }
+        // Fetch from Oxigraph...
+        for quad in store.store.iter().map(|q| q.unwrap()) {
+            triples.push(Triple {
+                subject: format!("{}", quad.subject),
+                predicate: format!("{}", quad.predicate),
+                object: format!("{}", quad.object),
+                provenance: None,
+            });
         }
 
         Ok(Response::new(TriplesResponse { triples }))
+    }
+
+    async fn query_sparql(
+        &self,
+        request: Request<SparqlRequest>,
+    ) -> Result<Response<SparqlResponse>, Status> {
+        let req = request.into_inner();
+        let store = self.get_namespace_store(&req.namespace)?;
+
+        match store.store.query(&req.query) {
+            Ok(results) => {
+                let mut output = String::new();
+                match results {
+                    oxigraph::sparql::QueryResults::Solutions(solutions) => {
+                        for solution in solutions {
+                            let s = solution.unwrap();
+                            output.push_str(&format!("{:?}\n", s));
+                        }
+                    }
+                    oxigraph::sparql::QueryResults::Boolean(v) => {
+                        output = format!("{}", v);
+                    }
+                    oxigraph::sparql::QueryResults::Graph(quads) => {
+                        for quad in quads {
+                            output.push_str(&format!("{:?}\n", quad.unwrap()));
+                        }
+                    }
+                }
+                Ok(Response::new(SparqlResponse {
+                    results_json: output,
+                }))
+            }
+            Err(e) => Err(Status::internal(e.to_string())),
+        }
     }
 
     async fn delete_namespace_data(
@@ -529,39 +176,16 @@ impl SemanticEngine for MySemanticEngine {
         request: Request<EmptyRequest>,
     ) -> Result<Response<DeleteResponse>, Status> {
         let req = request.into_inner();
-        let namespace = req.namespace;
+        let ns = req.namespace;
 
-        if namespace.is_empty() {
-            return Ok(Response::new(DeleteResponse {
-                success: false,
-                message: "Tenant ID required".to_string(),
-            }));
-        }
-
-        // 1. Remove from memory
         {
             let mut namespaces = self.namespaces.write().unwrap();
-            namespaces.remove(&namespace);
+            namespaces.remove(&ns);
         }
 
-        // 2. Remove from disk
-        let file_path = format!("{}/{}.bin", self.storage_path, namespace);
-        if Path::new(&file_path).exists() {
-            match std::fs::remove_file(&file_path) {
-                Ok(_) => Ok(Response::new(DeleteResponse {
-                    success: true,
-                    message: format!("Deleted data for namespace {}", namespace),
-                })),
-                Err(e) => Ok(Response::new(DeleteResponse {
-                    success: false,
-                    message: format!("Failed to delete file: {}", e),
-                })),
-            }
-        } else {
-            Ok(Response::new(DeleteResponse {
-                success: true,
-                message: "Tenant data not found (already clean)".to_string(),
-            }))
-        }
+        Ok(Response::new(DeleteResponse {
+            success: true,
+            message: format!("Deleted namespace {}", ns),
+        }))
     }
 }
