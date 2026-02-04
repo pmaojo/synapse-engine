@@ -43,13 +43,13 @@ class SemanticEngineClient:
             print(f"⚠️  Could not connect to Rust backend: {e}")
             return False
     
-    def ingest_triples(self, triples: List[dict], tenant_id: str = "") -> dict:
+    def ingest_triples(self, triples: List[dict], namespace: str = "") -> dict:
         """
         Send triples to Rust backend for storage.
         
         Args:
             triples: List of dicts with 'subject', 'predicate', 'object', and optional 'provenance'
-            tenant_id: Optional tenant ID for multi-tenancy
+            namespace: Optional tenant ID for multi-tenancy
             
         Returns:
             dict with 'nodes_added' and 'edges_added'
@@ -77,7 +77,7 @@ class SemanticEngineClient:
 
             request = pb2.IngestRequest(
                 triples=pb_triples,
-                tenant_id=tenant_id
+                namespace=namespace
             )
             response = self.stub.IngestTriples(request)
             return {
@@ -87,14 +87,14 @@ class SemanticEngineClient:
         except Exception as e:
             return {"error": str(e)}
     
-    def get_neighbors(self, node_id: int, tenant_id: str = "") -> List[dict]:
+    def get_neighbors(self, node_id: int, namespace: str = "") -> List[dict]:
         """Get neighbors of a node by ID"""
         if not self.connected:
             if not self.connect():
                 return []
         
         try:
-            request = pb2.NodeRequest(node_id=node_id, tenant_id=tenant_id)
+            request = pb2.NodeRequest(node_id=node_id, namespace=namespace)
             response = self.stub.GetNeighbors(request)
             return [
                 {"node_id": n.node_id, "edge_type": n.edge_type}
@@ -104,28 +104,28 @@ class SemanticEngineClient:
             print(f"Error getting neighbors: {e}")
             return []
     
-    def resolve_id(self, name: str, tenant_id: str = "") -> Optional[int]:
+    def resolve_id(self, name: str, namespace: str = "") -> Optional[int]:
         """Resolve a string name to a node ID"""
         if not self.connected:
             if not self.connect():
                 return None
         
         try:
-            request = pb2.ResolveRequest(content=name, tenant_id=tenant_id)
+            request = pb2.ResolveRequest(content=name, namespace=namespace)
             response = self.stub.ResolveId(request)
             return response.node_id if response.found else None
         except Exception as e:
             print(f"Error resolving ID: {e}")
             return None
     
-    def get_all_triples(self, tenant_id: str = "") -> List[dict]:
+    def get_all_triples(self, namespace: str = "") -> List[dict]:
         """Get all stored triples from Rust backend, including provenance"""
         if not self.connected:
             if not self.connect():
                 return []
         
         try:
-            request = pb2.EmptyRequest(tenant_id=tenant_id)
+            request = pb2.EmptyRequest(namespace=namespace)
             response = self.stub.GetAllTriples(request)
             result = []
             for t in response.triples:
@@ -146,14 +146,14 @@ class SemanticEngineClient:
             print(f"Error getting triples: {e}")
             return []
 
-    def delete_tenant_data(self, tenant_id: str) -> dict:
+    def delete_tenant_data(self, namespace: str) -> dict:
         """Delete all data for a tenant"""
         if not self.connected:
             if not self.connect():
                 return {"success": False, "message": "Not connected to Rust backend"}
 
         try:
-            request = pb2.EmptyRequest(tenant_id=tenant_id)
+            request = pb2.EmptyRequest(namespace=namespace)
             response = self.stub.DeleteTenantData(request)
             return {
                 "success": response.success,

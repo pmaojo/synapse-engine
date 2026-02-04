@@ -17,7 +17,7 @@ class ExtractTriplesUseCase:
         self.graph_repo = graph_repo
         self.ontology = ontology
 
-    def execute(self, text: str, tenant_id: str = "default") -> ExtractionResult:
+    def execute(self, text: str, namespace: str = "default") -> ExtractionResult:
         # 1. Extract
         if self.extractor:
              raw_triples = self.extractor.extract(text)
@@ -36,7 +36,7 @@ class ExtractTriplesUseCase:
         # 3. Store
         domain_triples = [Triple(s, p, o) for s, p, o in valid_triples]
         if self.graph_repo:
-            self.graph_repo.ingest_triples(domain_triples, tenant_id)
+            self.graph_repo.ingest_triples(domain_triples, namespace)
 
         return ExtractionResult(
             text=text,

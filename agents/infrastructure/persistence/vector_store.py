@@ -15,10 +15,10 @@ class VectorSearchResult:
 class VectorStore:
     """Vector store implementation using Qdrant"""
     
-    def __init__(self, collection_name: str = "semantic_graph", dimension: int = 384, url: str = None, client: Optional[QdrantClient] = None, tenant_id: str = None):
+    def __init__(self, collection_name: str = "semantic_graph", dimension: int = 384, url: str = None, client: Optional[QdrantClient] = None, namespace: str = None):
         self.base_collection_name = collection_name
         self.dimension = dimension
-        self.tenant_id = tenant_id # Default tenant ID, can be overridden in methods
+        self.namespace = namespace # Default tenant ID, can be overridden in methods
         
         # Use injected client, or create new one
         if client:
@@ -33,17 +33,17 @@ class VectorStore:
             else:
                 self.client = QdrantClient(path="./qdrant_storage")
             
-        # Ensure default collection exists if tenant_id is provided or implicit default
+        # Ensure default collection exists if namespace is provided or implicit default
         self._ensure_collection(self.get_collection_name())
 
-    def get_collection_name(self, tenant_id: Optional[str] = None) -> str:
-        """Get the collection name, optionally suffixed with tenant_id"""
-        # If explicit tenant_id provided, use it
-        if tenant_id:
-            return f"{self.base_collection_name}_{tenant_id}"
-        # If default tenant_id exists, use it
-        if self.tenant_id:
-            return f"{self.base_collection_name}_{self.tenant_id}"
+    def get_collection_name(self, namespace: Optional[str] = None) -> str:
+        """Get the collection name, optionally suffixed with namespace"""
+        # If explicit namespace provided, use it
+        if namespace:
+            return f"{self.base_collection_name}_{namespace}"
+        # If default namespace exists, use it
+        if self.namespace:
+            return f"{self.base_collection_name}_{self.namespace}"
         # Fallback to base name (shared collection or single tenant)
         return self.base_collection_name
         
@@ -61,12 +61,12 @@ class VectorStore:
                 )
             )
         
-    def add(self, node_id: str, vector: np.ndarray, metadata: Optional[Dict] = None, tenant_id: Optional[str] = None):
+    def add(self, node_id: str, vector: np.ndarray, metadata: Optional[Dict] = None, namespace: Optional[str] = None):
         """Add a vector to the store"""
         if vector.shape[0] != self.dimension:
             raise ValueError(f"Vector dimension mismatch: {vector.shape[0]} != {self.dimension}")
             
-        collection = self.get_collection_name(tenant_id)
+        collection = self.get_collection_name(namespace)
         # Ensure collection exists (lazy creation for new tenants)
         self._ensure_collection(collection)
 
@@ -91,11 +91,11 @@ class VectorStore:
             ]
         )
         
-    def search(self, query_vector: np.ndarray, top_k: int = 10, tenant_id: Optional[str] = None) -> List[VectorSearchResult]:
+    def search(self, query_vector: np.ndarray, top_k: int = 10, namespace: Optional[str] = None) -> List[VectorSearchResult]:
         """Search for similar vectors"""
         from qdrant_client.models import SearchRequest
         
-        collection = self.get_collection_name(tenant_id)
+        collection = self.get_collection_name(namespace)
         # Check if collection exists before querying to avoid error
         # Actually Qdrant raises error if collection doesn't exist.
         # But for search, maybe we just return empty if it doesn't exist?
@@ -122,12 +122,12 @@ class VectorStore:
                 return []
             raise e
     
-    def delete(self, node_id: str, tenant_id: Optional[str] = None):
+    def delete(self, node_id: str, namespace: Optional[str] = None):
         """Remove a vector"""
         import uuid
         point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, node_id))
 
-        collection = self.get_collection_name(tenant_id)
+        collection = self.get_collection_name(namespace)
 
         self.client.delete(
             collection_name=collection,
@@ -136,9 +136,9 @@ class VectorStore:
             )
         )
 
-    def delete_collection(self, tenant_id: Optional[str] = None):
+    def delete_collection(self, namespace: Optional[str] = None):
         """Delete the entire collection for the current tenant"""
-        collection = self.get_collection_name(tenant_id)
+        collection = self.get_collection_name(namespace)
         try:
             self.client.delete_collection(collection_name=collection)
             # Do NOT recreate immediately, wait for next add

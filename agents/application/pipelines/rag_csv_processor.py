@@ -22,13 +22,13 @@ class RAGEnhancedCSVProcessor:
         self.vector_store = vector_store
         self.document_context = {}
     
-    def process_csv(self, filepath: Path, tenant_id: str = None) -> List[Tuple[str, str, str]]:
+    def process_csv(self, filepath: Path, namespace: str = None) -> List[Tuple[str, str, str]]:
         """
         Process CSV with RAG-based context extraction.
         
         Args:
             filepath: Path to CSV file
-            tenant_id: Tenant ID for isolation
+            namespace: Tenant ID for isolation
         
         Returns:
             List of extracted triples
@@ -40,13 +40,13 @@ class RAGEnhancedCSVProcessor:
             return []
         
         # Step 2: Build document context via RAG
-        self._build_document_context(rows, filepath.stem, tenant_id)
+        self._build_document_context(rows, filepath.stem, namespace)
         
         # Step 3: Extract triples with context
         triples = []
         for i, row in enumerate(rows):
             # Get contextual information via RAG
-            context = self._get_row_context(row, i, rows, tenant_id)
+            context = self._get_row_context(row, i, rows, namespace)
             
             # Extract triples using context
             row_triples = self._extract_with_context(row, context)
@@ -69,7 +69,7 @@ class RAGEnhancedCSVProcessor:
         
         return rows
     
-    def _build_document_context(self, rows: List[Dict], doc_name: str, tenant_id: str = None):
+    def _build_document_context(self, rows: List[Dict], doc_name: str, namespace: str = None):
         """
         Build document-level context using embeddings.
         Index each row for semantic search.
@@ -91,10 +91,10 @@ class RAGEnhancedCSVProcessor:
                     "document": doc_name,
                     "description": row_text[:200]
                 },
-                tenant_id=tenant_id
+                namespace=namespace
             )
     
-    def _get_row_context(self, row: Dict, row_index: int, all_rows: List[Dict], tenant_id: str = None) -> Dict[str, Any]:
+    def _get_row_context(self, row: Dict, row_index: int, all_rows: List[Dict], namespace: str = None) -> Dict[str, Any]:
         """
         Get contextual information for a row using RAG.
         
@@ -110,7 +110,7 @@ class RAGEnhancedCSVProcessor:
         query_emb = self.embedder.encode_single(query_text)
         
         # Find similar rows via RAG
-        similar = self.vector_store.search(query_emb, top_k=3, tenant_id=tenant_id)
+        similar = self.vector_store.search(query_emb, top_k=3, namespace=namespace)
         
         # Get sequential context (previous/next rows)
         previous_rows = []

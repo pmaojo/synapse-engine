@@ -66,13 +66,13 @@ class DataSynPipeline(PipelineStrategy):
         """
         Args:
             input_data: Filename or path to process
-            kwargs: Additional arguments, e.g., tenant_id
+            kwargs: Additional arguments, e.g., namespace
         """
         import time
         from agents.grpc.client import get_client
         
-        # Extract tenant_id from kwargs
-        tenant_id = kwargs.get("tenant_id", "default")
+        # Extract namespace from kwargs
+        namespace = kwargs.get("namespace", "default")
 
         # Initialize AIR for this run
         air = get_air()
@@ -96,14 +96,14 @@ class DataSynPipeline(PipelineStrategy):
         
         logs.append(f"📄 Processing: {filepath.name}")
         logs.append(f"📏 Size: {filepath.stat().st_size / 1024:.1f} KB")
-        logs.append(f"👤 Tenant: {tenant_id}")
+        logs.append(f"👤 Tenant: {namespace}")
         
         # AIR: Reward for successful file access
         air.record_event(RewardSignal.CSV_PARSED, {"file": filepath.name})
         
         # Route by file type
         if filepath.suffix == '.csv':
-            triples = self._process_csv(filepath, logs, tenant_id=tenant_id)
+            triples = self._process_csv(filepath, logs, namespace=namespace)
         elif filepath.suffix == '.md':
             triples = self._process_markdown(filepath, logs)
         elif filepath.suffix == '.json':
@@ -121,7 +121,7 @@ class DataSynPipeline(PipelineStrategy):
         # Store in Rust backend
         rust_client = get_client()
         if all_triples and rust_client.connected:
-            storage_result = rust_client.ingest_triples(all_triples, tenant_id=tenant_id)
+            storage_result = rust_client.ingest_triples(all_triples, namespace=namespace)
             logs.append(f"💾 Rust Storage: {storage_result.get('edges_added', 0)} edges, {storage_result.get('nodes_added', 0)} nodes")
             
             # AIR: Reward for successful storage
@@ -156,7 +156,7 @@ class DataSynPipeline(PipelineStrategy):
     
     
     
-    def _process_csv(self, filepath: Path, logs: List[str], tenant_id: str = "default") -> List[Tuple[str, str, str]]:
+    def _process_csv(self, filepath: Path, logs: List[str], namespace: str = "default") -> List[Tuple[str, str, str]]:
         """
         Optimized Incremental CSV Processing + OWL Reasoning
         Based on: iText2KG (2024), GraphRAG (2024)
@@ -174,7 +174,7 @@ class DataSynPipeline(PipelineStrategy):
         
         triples = []
         embedder = EmbeddingGenerator()
-        vector_store = VectorStore(collection_name=f"csv_{filepath.stem}", dimension=384, tenant_id=tenant_id)
+        vector_store = VectorStore(collection_name=f"csv_{filepath.stem}", dimension=384, namespace=namespace)
         rust_client = get_client()
         
         # Initialize Validator
@@ -203,7 +203,7 @@ class DataSynPipeline(PipelineStrategy):
                     # RAG lookup
                     row_text = " | ".join([f"{k}: {v}" for k, v in row.items() if v])
                     query_emb = embedder.encode_single(row_text)
-                    similar = vector_store.search(query_emb, top_k=3, tenant_id=tenant_id)
+                    similar = vector_store.search(query_emb, top_k=3, namespace=namespace)
                     
                     # Extract with context
                     rag_context = [doc.metadata.get("description", "") for doc in similar]
@@ -223,7 +223,7 @@ class DataSynPipeline(PipelineStrategy):
 
                     # Store immediately
                     if row_triples and rust_client.connected:
-                        rust_client.ingest_triples(row_triples, tenant_id=tenant_id)
+                        rust_client.ingest_triples(row_triples, namespace=namespace)
                         triples.extend(row_triples)
                     
                     # Index for future RAG
@@ -231,7 +231,7 @@ class DataSynPipeline(PipelineStrategy):
                         node_id=f"{filepath.stem}_row_{row_num}",
                         embedding=query_emb,
                         metadata={"description": row_text[:200]},
-                        tenant_id=tenant_id
+                        namespace=namespace
                     )
                     
                     # OWL reasoning every 100 rows
@@ -239,7 +239,7 @@ class DataSynPipeline(PipelineStrategy):
                         logs.append(f"  🧠 OWL reasoning at row {row_num}...")
                         inferred = self._owl_reasoning(triples[-100:])
                         if inferred:
-                            rust_client.ingest_triples(inferred, tenant_id=tenant_id)
+                            rust_client.ingest_triples(inferred, namespace=namespace)
                             triples.extend(inferred)
                             logs.append(f"    +{len(inferred)} inferred triples")
                         logs.append(f"  ✓ {row_num} rows, {len(triples)} total triples")
@@ -252,7 +252,7 @@ class DataSynPipeline(PipelineStrategy):
                 logs.append("🧠 Final OWL reasoning...")
                 final_inferred = self._owl_reasoning(triples[-100:])
                 if final_inferred:
-                    rust_client.ingest_triples(final_inferred, tenant_id=tenant_id)
+                    rust_client.ingest_triples(final_inferred, namespace=namespace)
                     triples.extend(final_inferred)
                 
                 logs.append(f"✅ Complete: {len(triples)} triples")

@@ -50,7 +50,7 @@ pub async fn run_mcp_stdio(
                             "inputSchema": {
                                 "type": "object",
                                 "properties": {
-                                    "tenant_id": { "type": "string", "default": "robin_os" }
+                                    "namespace": { "type": "string", "default": "robin_os" }
                                 }
                             }
                         },
@@ -63,7 +63,7 @@ pub async fn run_mcp_stdio(
                                     "subject": { "type": "string" },
                                     "predicate": { "type": "string" },
                                     "object": { "type": "string" },
-                                    "tenant_id": { "type": "string", "default": "robin_os" }
+                                    "namespace": { "type": "string", "default": "robin_os" }
                                 },
                                 "required": ["subject", "predicate", "object"]
                             }
@@ -78,11 +78,11 @@ pub async fn run_mcp_stdio(
 
                 match name {
                     "query_graph" => {
-                        let tenant_id = args["tenant_id"].as_str().unwrap_or("robin_os");
+                        let namespace = args["namespace"].as_str().unwrap_or("robin_os");
                         let triples = engine
                             .get_all_triples(tonic::Request::new(
                                 crate::server::semantic_engine::EmptyRequest {
-                                    tenant_id: tenant_id.to_string(),
+                                    namespace: namespace.to_string(),
                                 },
                             ))
                             .await?;
@@ -107,7 +107,7 @@ pub async fn run_mcp_stdio(
                         let sub = args["subject"].as_str().unwrap_or("");
                         let pred = args["predicate"].as_str().unwrap_or("");
                         let obj = args["object"].as_str().unwrap_or("");
-                        let tenant_id = args["tenant_id"].as_str().unwrap_or("robin_os");
+                        let namespace = args["namespace"].as_str().unwrap_or("robin_os");
 
                         let triple = crate::server::semantic_engine::Triple {
                             subject: sub.to_string(),
@@ -120,7 +120,7 @@ pub async fn run_mcp_stdio(
                             .ingest_triples(tonic::Request::new(
                                 crate::server::semantic_engine::IngestRequest {
                                     triples: vec![triple],
-                                    tenant_id: tenant_id.to_string(),
+                                    namespace: namespace.to_string(),
                                 },
                             ))
                             .await?;

@@ -8,7 +8,7 @@ class ReasonWithOWLUseCase:
         self.reasoner = reasoner_agent or reasoning_engine
         self.graph_repo = graph_repo
 
-    def execute(self, triples: List[Triple], tenant_id: str = "default", auto_store: bool = True) -> InferenceResult:
+    def execute(self, triples: List[Triple], namespace: str = "default", auto_store: bool = True) -> InferenceResult:
         # Convert domain triples to tuples for reasoning agent
         input_tuples = [(t.subject, t.predicate, t.object) for t in triples]
 
@@ -26,7 +26,7 @@ class ReasonWithOWLUseCase:
 
         # Store
         if auto_store and inferred_triples and self.graph_repo:
-            self.graph_repo.ingest_triples(inferred_triples, tenant_id)
+            self.graph_repo.ingest_triples(inferred_triples, namespace)
 
         return InferenceResult(
             original_triples=triples,

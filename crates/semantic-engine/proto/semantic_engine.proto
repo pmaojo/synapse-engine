@@ -17,8 +17,8 @@ service SemanticEngine {
     // Get all stored triples (for graph visualization)
     rpc GetAllTriples (EmptyRequest) returns (TriplesResponse);
 
-    // Deletes all data associated with a tenant
-    rpc DeleteTenantData (EmptyRequest) returns (DeleteResponse);
+    // Deletes all data associated with a namespace
+    rpc DeleteNamespaceData (EmptyRequest) returns (DeleteResponse);
 }
 
 message DeleteResponse {
@@ -41,7 +41,7 @@ message Triple {
 
 message IngestRequest {
     repeated Triple triples = 1;
-    string tenant_id = 2;
+    string namespace = 2;
 }
 
 message IngestResponse {
@@ -51,7 +51,7 @@ message IngestResponse {
 
 message NodeRequest {
     uint32 node_id = 1;
-    string tenant_id = 2;
+    string namespace = 2;
 }
 
 message NeighborResponse {
@@ -66,7 +66,7 @@ message Neighbor {
 message SearchRequest {
     string query = 1;
     uint32 limit = 2;
-    string tenant_id = 3;
+    string namespace = 3;
 }
 
 message SearchResponse {
@@ -81,7 +81,7 @@ message SearchResult {
 
 message ResolveRequest {
     string content = 1;
-    string tenant_id = 2;
+    string namespace = 2;
 }
 
 message ResolveResponse {
@@ -90,7 +90,7 @@ message ResolveResponse {
 }
 
 message EmptyRequest {
-    string tenant_id = 1;
+    string namespace = 1;
 }
 
 message TriplesResponse {

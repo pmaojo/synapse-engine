@@ -19,7 +19,7 @@ class AgentTask:
     context: Dict[str, Any] = field(default_factory=dict)
     id: str = field(default_factory=lambda: str(uuid.uuid4()))
     created_at: datetime.datetime = field(default_factory=datetime.datetime.now)
-    tenant_id: Optional[str] = None
+    namespace: Optional[str] = None
 
 @dataclass
 class AgentResponse:

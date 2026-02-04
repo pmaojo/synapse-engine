@@ -24,7 +24,7 @@ class IngestionService:
                source: str = "unknown",
                metadata: Optional[Dict[str, Any]] = None,
                skip_enrichment: bool = False,
-               tenant_id: str = "default") -> Dict[str, Any]:
+               namespace: str = "default") -> Dict[str, Any]:
         """
         Main ingestion entry point.
         
@@ -33,7 +33,7 @@ class IngestionService:
             source: Origin identifier (e.g., "CSV:plants.csv:row_5", "UI:Tab1")
             metadata: Additional context (timestamp, confidence, etc.)
             skip_enrichment: If True, skip OWL reasoning step
-            tenant_id: Tenant ID for isolation
+            namespace: Tenant ID for isolation
             
         Returns:
             Dictionary with ingestion statistics
@@ -69,7 +69,7 @@ class IngestionService:
         
         # 5. BATCH STORE
         if triples_with_provenance:
-            stored_count = self._batch_store(triples_with_provenance, tenant_id=tenant_id)
+            stored_count = self._batch_store(triples_with_provenance, namespace=namespace)
             stats["stored"] = stored_count
         
         return stats
@@ -168,12 +168,12 @@ class IngestionService:
         
         return timestamped
     
-    def _batch_store(self, triples_with_meta: List[Dict], tenant_id: str = "default") -> int:
+    def _batch_store(self, triples_with_meta: List[Dict], namespace: str = "default") -> int:
         """Store triples in Rust backend efficiently"""
         try:
             if self.rust_client.connected:
                 # Pass full list of dictionaries with provenance
-                result = self.rust_client.ingest_triples(triples_with_meta, tenant_id=tenant_id)
+                result = self.rust_client.ingest_triples(triples_with_meta, namespace=namespace)
                 return len(triples_with_meta) # Or check result['edges_added']
             return 0
         except Exception as e:

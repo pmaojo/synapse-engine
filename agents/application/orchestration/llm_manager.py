@@ -286,16 +286,16 @@ You can select multiple tools if needed (they'll execute in sequence).
         elif tool == ToolType.RAG_SEARCH:
             embedder = context["embedder"]
             vector_store = context["vector_store"]
-            tenant_id = context.get("tenant_id")
+            namespace = context.get("namespace")
             
             query_emb = embedder.encode_single(params.get("query", ""))
-            results = vector_store.search(query_emb, top_k=3, tenant_id=tenant_id)
+            results = vector_store.search(query_emb, top_k=3, namespace=namespace)
             return {"results": [r.metadata for r in results]}
         
         elif tool == ToolType.PIPELINE_DATASYN:
             pipeline_engine = context["pipeline_engine"]
-            tenant_id = context.get("tenant_id", "default")
-            return pipeline_engine.run_pipeline("DataSyn Processor", params.get("input", ""), tenant_id=tenant_id)
+            namespace = context.get("namespace", "default")
+            return pipeline_engine.run_pipeline("DataSyn Processor", params.get("input", ""), namespace=namespace)
         
         else:
             return {"error": f"Tool {tool.value} not yet implemented"}

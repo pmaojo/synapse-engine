@@ -21,8 +21,8 @@ use semantic_engine::{
     Triple, TriplesResponse,
 };
 
-pub struct TenantGraph {
-    pub tenant_id: String,
+pub struct NamespaceGraph {
+    pub namespace: String,
     pub topology: AsyncRwLock<GraphTopology>,
     pub properties: AsyncRwLock<PropertyStore>,
     pub edge_properties: AsyncRwLock<PropertyStore>,
@@ -41,10 +41,10 @@ pub struct TenantGraph {
     pub next_edge_id: AtomicU32,
 }
 
-impl TenantGraph {
-    pub fn new(tenant_id: &str) -> Self {
+impl NamespaceGraph {
+    pub fn new(namespace: &str) -> Self {
         Self {
-            tenant_id: tenant_id.to_string(),
+            namespace: namespace.to_string(),
             topology: AsyncRwLock::new(GraphTopology::new()),
             properties: AsyncRwLock::new(PropertyStore::new()),
             edge_properties: AsyncRwLock::new(PropertyStore::new()),
@@ -147,8 +147,8 @@ impl TenantGraph {
         }
     }
 
-    pub async fn from_snapshot(tenant_id: &str, snapshot: GraphSnapshot) -> Self {
-        let graph = TenantGraph::new(tenant_id);
+    pub async fn from_snapshot(namespace: &str, snapshot: GraphSnapshot) -> Self {
+        let graph = NamespaceGraph::new(namespace);
 
         // Restore dictionaries
         {
@@ -214,14 +214,14 @@ impl TenantGraph {
 
 pub struct MySemanticEngine {
     // Map of Tenant ID -> Tenant Graph
-    pub tenants: Arc<RwLock<HashMap<String, Arc<TenantGraph>>>>,
+    pub namespaces: Arc<RwLock<HashMap<String, Arc<NamespaceGraph>>>>,
     pub storage_path: Arc<String>,
 }
 
 impl Clone for MySemanticEngine {
     fn clone(&self) -> Self {
         Self {
-            tenants: Arc::clone(&self.tenants),
+            namespaces: Arc::clone(&self.namespaces),
             storage_path: Arc::clone(&self.storage_path),
         }
     }
@@ -237,24 +237,24 @@ impl MySemanticEngine {
         }
 
         Self {
-            tenants: Arc::new(RwLock::new(HashMap::new())),
+            namespaces: Arc::new(RwLock::new(HashMap::new())),
             storage_path: Arc::new(storage_path.to_string()),
         }
     }
 
-    // Helper to get a tenant graph (creating if not exists)
-    async fn get_tenant_graph(&self, tenant_id: &str) -> Arc<TenantGraph> {
-        // Default to "default" tenant if empty
-        let tid = if tenant_id.is_empty() {
+    // Helper to get a namespace graph (creating if not exists)
+    async fn get_namespace_graph(&self, namespace: &str) -> Arc<NamespaceGraph> {
+        // Default to "default" namespace if empty
+        let tid = if namespace.is_empty() {
             "default"
         } else {
-            tenant_id
+            namespace
         };
 
         // Optimistic read
         {
-            let tenants = self.tenants.read().unwrap();
-            if let Some(graph) = tenants.get(tid) {
+            let namespaces = self.namespaces.read().unwrap();
+            if let Some(graph) = namespaces.get(tid) {
                 return graph.clone();
             }
         } // Drop read lock
@@ -262,26 +262,26 @@ impl MySemanticEngine {
         // Try load from disk - do NOT hold lock during IO
         let file_path = format!("{}/{}.bin", self.storage_path, tid);
         let graph = if Path::new(&file_path).exists() {
-            println!("📥 Loading graph for tenant '{}' from {}", tid, file_path);
+            println!("📥 Loading graph for namespace '{}' from {}", tid, file_path);
             match GraphSnapshot::load_from_file(&file_path) {
-                Ok(snapshot) => Arc::new(TenantGraph::from_snapshot(tid, snapshot).await),
+                Ok(snapshot) => Arc::new(NamespaceGraph::from_snapshot(tid, snapshot).await),
                 Err(e) => {
                     println!("❌ Failed to load snapshot for {}: {}", tid, e);
-                    Arc::new(TenantGraph::new(tid))
+                    Arc::new(NamespaceGraph::new(tid))
                 }
             }
         } else {
-            Arc::new(TenantGraph::new(tid))
+            Arc::new(NamespaceGraph::new(tid))
         };
 
         // Write lock
         {
-            let mut tenants = self.tenants.write().unwrap();
+            let mut namespaces = self.namespaces.write().unwrap();
             // Check again (Double-checked locking)
-            if let Some(existing_graph) = tenants.get(tid) {
+            if let Some(existing_graph) = namespaces.get(tid) {
                 return existing_graph.clone();
             }
-            tenants.insert(tid.to_string(), graph.clone());
+            namespaces.insert(tid.to_string(), graph.clone());
         }
 
         graph
@@ -295,20 +295,20 @@ impl SemanticEngine for MySemanticEngine {
         request: Request<IngestRequest>,
     ) -> Result<Response<IngestResponse>, Status> {
         let req = request.into_inner();
-        let tenant_graph = self.get_tenant_graph(&req.tenant_id).await;
+        let namespace_graph = self.get_namespace_graph(&req.namespace).await;
 
         let mut nodes_added = 0;
         let mut edges_added = 0;
 
         // We need a write lock for the duration of the batch to ensure consistency of the topology vector
-        let mut topo = tenant_graph.topology.write().await;
-        let mut edge_props = tenant_graph.edge_properties.write().await;
+        let mut topo = namespace_graph.topology.write().await;
+        let mut edge_props = namespace_graph.edge_properties.write().await;
 
         for triple in req.triples {
             // 1. Resolve Subject
-            let s_id = tenant_graph.get_or_create_node_id(&triple.subject).0;
-            let o_id = tenant_graph.get_or_create_node_id(&triple.object).0;
-            let p_id = tenant_graph.get_or_create_predicate_id(&triple.predicate);
+            let s_id = namespace_graph.get_or_create_node_id(&triple.subject).0;
+            let o_id = namespace_graph.get_or_create_node_id(&triple.object).0;
+            let p_id = namespace_graph.get_or_create_predicate_id(&triple.predicate);
 
             // Ensure topology has space
             let max_id = std::cmp::max(s_id, o_id);
@@ -318,7 +318,7 @@ impl SemanticEngine for MySemanticEngine {
             }
 
             // 3. Generate Edge ID and Store Provenance
-            let edge_id = tenant_graph.next_edge_id.fetch_add(1, Ordering::Relaxed);
+            let edge_id = namespace_graph.next_edge_id.fetch_add(1, Ordering::Relaxed);
 
             if let Some(prov) = triple.provenance {
                 // Store Source (Prop ID 1)
@@ -353,12 +353,12 @@ impl SemanticEngine for MySemanticEngine {
         drop(edge_props);
 
         // Auto-save after ingest
-        let tenant_graph_clone = tenant_graph.clone();
+        let namespace_graph_clone = namespace_graph.clone();
         let storage_path = self.storage_path.clone();
 
         tokio::spawn(async move {
-            let snapshot = tenant_graph_clone.to_snapshot().await;
-            let tid = tenant_graph_clone.tenant_id.clone();
+            let snapshot = namespace_graph_clone.to_snapshot().await;
+            let tid = namespace_graph_clone.namespace.clone();
             let file_path = format!("{}/{}.bin", storage_path, tid);
 
             let _ = tokio::task::spawn_blocking(move || {
@@ -380,15 +380,15 @@ impl SemanticEngine for MySemanticEngine {
         request: Request<NodeRequest>,
     ) -> Result<Response<NeighborResponse>, Status> {
         let req = request.into_inner();
-        let tenant_graph = self.get_tenant_graph(&req.tenant_id).await;
+        let namespace_graph = self.get_namespace_graph(&req.namespace).await;
 
-        let topo = tenant_graph.topology.read().await;
+        let topo = namespace_graph.topology.read().await;
 
         let neighbors = topo
             .neighbors(req.node_id)
             .map(|(n, t, _)| {
                 // Resolve Predicate ID to String Name
-                let rev_pred_dict = tenant_graph.reverse_predicate_dictionary.read().unwrap();
+                let rev_pred_dict = namespace_graph.reverse_predicate_dictionary.read().unwrap();
                 let edge_name = rev_pred_dict
                     .get(&t)
                     .cloned()
@@ -417,11 +417,11 @@ impl SemanticEngine for MySemanticEngine {
         request: Request<ResolveRequest>,
     ) -> Result<Response<ResolveResponse>, Status> {
         let req = request.into_inner();
-        let tenant_graph = self.get_tenant_graph(&req.tenant_id).await;
+        let namespace_graph = self.get_namespace_graph(&req.namespace).await;
 
         // Optimistic read
         let id_opt = {
-            let dict = tenant_graph.dictionary.read().unwrap();
+            let dict = namespace_graph.dictionary.read().unwrap();
             dict.get(&req.content).cloned()
         };
 
@@ -443,10 +443,10 @@ impl SemanticEngine for MySemanticEngine {
         request: Request<EmptyRequest>,
     ) -> Result<Response<TriplesResponse>, Status> {
         let req = request.into_inner();
-        let tenant_graph = self.get_tenant_graph(&req.tenant_id).await;
+        let namespace_graph = self.get_namespace_graph(&req.namespace).await;
 
-        let topo = tenant_graph.topology.read().await;
-        let edge_props = tenant_graph.edge_properties.read().await;
+        let topo = namespace_graph.topology.read().await;
+        let edge_props = namespace_graph.edge_properties.read().await;
         let mut triples = Vec::new();
 
         // Iterate through all nodes and their edges
@@ -454,7 +454,7 @@ impl SemanticEngine for MySemanticEngine {
             for (neighbor_id, predicate_id, edge_id) in topo.neighbors(node_id) {
                 // Resolve IDs to strings
                 let subject = {
-                    let rev_dict = tenant_graph.reverse_dictionary.read().unwrap();
+                    let rev_dict = namespace_graph.reverse_dictionary.read().unwrap();
                     rev_dict
                         .get(&node_id)
                         .cloned()
@@ -462,7 +462,7 @@ impl SemanticEngine for MySemanticEngine {
                 };
 
                 let object = {
-                    let rev_dict = tenant_graph.reverse_dictionary.read().unwrap();
+                    let rev_dict = namespace_graph.reverse_dictionary.read().unwrap();
                     rev_dict
                         .get(&neighbor_id)
                         .cloned()
@@ -470,7 +470,7 @@ impl SemanticEngine for MySemanticEngine {
                 };
 
                 let predicate = {
-                    let rev_pred_dict = tenant_graph.reverse_predicate_dictionary.read().unwrap();
+                    let rev_pred_dict = namespace_graph.reverse_predicate_dictionary.read().unwrap();
                     rev_pred_dict
                         .get(&predicate_id)
                         .cloned()
@@ -524,14 +524,14 @@ impl SemanticEngine for MySemanticEngine {
         Ok(Response::new(TriplesResponse { triples }))
     }
 
-    async fn delete_tenant_data(
+    async fn delete_namespace_data(
         &self,
         request: Request<EmptyRequest>,
     ) -> Result<Response<DeleteResponse>, Status> {
         let req = request.into_inner();
-        let tenant_id = req.tenant_id;
+        let namespace = req.namespace;
 
-        if tenant_id.is_empty() {
+        if namespace.is_empty() {
             return Ok(Response::new(DeleteResponse {
                 success: false,
                 message: "Tenant ID required".to_string(),
@@ -540,17 +540,17 @@ impl SemanticEngine for MySemanticEngine {
 
         // 1. Remove from memory
         {
-            let mut tenants = self.tenants.write().unwrap();
-            tenants.remove(&tenant_id);
+            let mut namespaces = self.namespaces.write().unwrap();
+            namespaces.remove(&namespace);
         }
 
         // 2. Remove from disk
-        let file_path = format!("{}/{}.bin", self.storage_path, tenant_id);
+        let file_path = format!("{}/{}.bin", self.storage_path, namespace);
         if Path::new(&file_path).exists() {
             match std::fs::remove_file(&file_path) {
                 Ok(_) => Ok(Response::new(DeleteResponse {
                     success: true,
-                    message: format!("Deleted data for tenant {}", tenant_id),
+                    message: format!("Deleted data for namespace {}", namespace),
                 })),
                 Err(e) => Ok(Response::new(DeleteResponse {
                     success: false,

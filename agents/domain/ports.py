@@ -4,11 +4,11 @@ from agents.domain.entities import Triple
 
 class IGraphRepository(ABC):
     @abstractmethod
-    def ingest_triples(self, triples: List[Triple], tenant_id: str) -> bool:
+    def ingest_triples(self, triples: List[Triple], namespace: str) -> bool:
         pass
 
     @abstractmethod
-    def get_all_triples(self, tenant_id: str) -> List[Triple]:
+    def get_all_triples(self, namespace: str) -> List[Triple]:
         pass
 
 class IEmbeddingService(ABC):

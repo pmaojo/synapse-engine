@@ -27,7 +27,7 @@ To use Synapse as your agent's memory, add this to your `openclaw.json`:
 - **Blazing Fast Core**: Rust-based graph engine.
 - **Native MCP**: Plugs directly into OpenClaw/Cursor.
 - **Neuro-Symbolic**: Combines triples with vector embeddings.
-- **Tenant Isolation**: Manage multiple knowledge bases.
+- **Namespace Isolation**: Manage multiple knowledge bases.
 
 ---
 *Developed by the Synapse Team*
