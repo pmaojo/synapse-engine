@@ -1,5 +1,6 @@
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
+use dashmap::DashMap;
 
 pub mod proto {
     tonic::include_proto!("semantic_engine");
@@ -15,13 +16,29 @@ use crate::ingest::IngestionEngine;
 use std::path::Path;
 
 pub struct MySemanticEngine {
-    pub store: Arc<SynapseStore>,
+    pub storage_path: String,
+    pub stores: DashMap<String, Arc<SynapseStore>>,
 }
 
 impl MySemanticEngine {
     pub fn new(storage_path: &str) -> Self {
-        let store = SynapseStore::open("default", storage_path).unwrap();
-        Self { store: Arc::new(store) }
+        Self {
+            storage_path: storage_path.to_string(),
+            stores: DashMap::new(),
+        }
+    }
+
+    fn get_store(&self, namespace: &str) -> Result<Arc<SynapseStore>, Status> {
+        if let Some(store) = self.stores.get(namespace) {
+            return Ok(store.clone());
+        }
+
+        let store = SynapseStore::open(namespace, &self.storage_path)
+            .map_err(|e| Status::internal(format!("Failed to open store for namespace '{}': {}", namespace, e)))?;
+        
+        let store_arc = Arc::new(store);
+        self.stores.insert(namespace.to_string(), store_arc.clone());
+        Ok(store_arc)
     }
 }
 
@@ -32,13 +49,15 @@ impl SemanticEngine for MySemanticEngine {
         request: Request<IngestRequest>,
     ) -> Result<Response<IngestResponse>, Status> {
         let req = request.into_inner();
+        let namespace = if req.namespace.is_empty() { "default" } else { &req.namespace };
+        let store = self.get_store(namespace)?;
+
         let triples: Vec<(String, String, String)> = req
             .triples
             .into_iter()
             .map(|t| (t.subject, t.predicate, t.object))
             .collect();
 
-        let store = self.store.clone();
         match store.ingest_triples(triples).await {
             Ok((added, _)) => Ok(Response::new(IngestResponse {
                 nodes_added: added,
@@ -53,10 +72,13 @@ impl SemanticEngine for MySemanticEngine {
         request: Request<IngestFileRequest>,
     ) -> Result<Response<IngestResponse>, Status> {
         let req = request.into_inner();
-        let engine = IngestionEngine::new(self.store.clone());
+        let namespace = if req.namespace.is_empty() { "default" } else { &req.namespace };
+        let store = self.get_store(namespace)?;
+        
+        let engine = IngestionEngine::new(store);
         let path = Path::new(&req.file_path);
 
-        match engine.ingest_file(path, &req.namespace).await {
+        match engine.ingest_file(path, namespace).await {
             Ok(count) => Ok(Response::new(IngestResponse {
                 nodes_added: count,
                 edges_added: count,
@@ -77,7 +99,8 @@ impl SemanticEngine for MySemanticEngine {
         request: Request<SearchRequest>,
     ) -> Result<Response<SearchResponse>, Status> {
         let req = request.into_inner();
-        let store = self.store.clone();
+        let namespace = if req.namespace.is_empty() { "default" } else { &req.namespace };
+        let store = self.get_store(namespace)?;
 
         match store.hybrid_search(&req.query, req.limit as usize, 0).await {
             Ok(results) => {
@@ -109,9 +132,12 @@ impl SemanticEngine for MySemanticEngine {
 
     async fn get_all_triples(
         &self,
-        _request: Request<EmptyRequest>,
+        request: Request<EmptyRequest>,
     ) -> Result<Response<TriplesResponse>, Status> {
-        let store = self.store.clone();
+        let req = request.into_inner();
+        let namespace = if req.namespace.is_empty() { "default" } else { &req.namespace };
+        let store = self.get_store(namespace)?;
+        
         let mut triples = Vec::new();
 
         for quad in store.store.iter().map(|q| q.unwrap()) {
@@ -136,7 +162,9 @@ impl SemanticEngine for MySemanticEngine {
         request: Request<SparqlRequest>,
     ) -> Result<Response<SparqlResponse>, Status> {
         let req = request.into_inner();
-        let store = self.store.clone();
+        let namespace = if req.namespace.is_empty() { "default" } else { &req.namespace };
+        let store = self.get_store(namespace)?;
+        
         match store.query_sparql(&req.query) {
             Ok(json) => Ok(Response::new(SparqlResponse { results_json: json })),
             Err(e) => Err(Status::internal(e.to_string())),
@@ -145,11 +173,23 @@ impl SemanticEngine for MySemanticEngine {
 
     async fn delete_namespace_data(
         &self,
-        _request: Request<EmptyRequest>,
+        request: Request<EmptyRequest>,
     ) -> Result<Response<DeleteResponse>, Status> {
+        let req = request.into_inner();
+        let namespace = if req.namespace.is_empty() { "default" } else { &req.namespace };
+        
+        // Remove from cache
+        self.stores.remove(namespace);
+        
+        // Delete directory
+        let path = Path::new(&self.storage_path).join(namespace);
+        if path.exists() {
+            std::fs::remove_dir_all(path).map_err(|e| Status::internal(e.to_string()))?;
+        }
+
         Ok(Response::new(DeleteResponse {
             success: true,
-            message: "Deleted".to_string(),
+            message: format!("Deleted namespace '{}'", namespace),
         }))
     }
 
@@ -158,7 +198,8 @@ impl SemanticEngine for MySemanticEngine {
         request: Request<HybridSearchRequest>,
     ) -> Result<Response<SearchResponse>, Status> {
         let req = request.into_inner();
-        let store = self.store.clone();
+        let namespace = if req.namespace.is_empty() { "default" } else { &req.namespace };
+        let store = self.get_store(namespace)?;
 
         let vector_k = req.vector_k as usize;
         let graph_depth = req.graph_depth;
@@ -190,7 +231,8 @@ impl SemanticEngine for MySemanticEngine {
         request: Request<ReasoningRequest>,
     ) -> Result<Response<ReasoningResponse>, Status> {
         let req = request.into_inner();
-        let store = self.store.clone();
+        let namespace = if req.namespace.is_empty() { "default" } else { &req.namespace };
+        let store = self.get_store(namespace)?;
         
         let strategy = match ReasoningStrategy::try_from(req.strategy) {
             Ok(ReasoningStrategy::Rdfs) => InternalStrategy::RDFS,
@@ -205,7 +247,7 @@ impl SemanticEngine for MySemanticEngine {
                 Ok(count) => Ok(Response::new(ReasoningResponse {
                     success: true,
                     triples_inferred: count as u32,
-                    message: format!("Materialized {} triples", count),
+                    message: format!("Materialized {} triples in namespace '{}'", count, namespace),
                 })),
                 Err(e) => Err(Status::internal(e.to_string())),
             }
@@ -214,7 +256,7 @@ impl SemanticEngine for MySemanticEngine {
                 Ok(triples) => Ok(Response::new(ReasoningResponse {
                     success: true,
                     triples_inferred: triples.len() as u32,
-                    message: format!("Found {} inferred triples", triples.len()),
+                    message: format!("Found {} inferred triples in namespace '{}'", triples.len(), namespace),
                 })),
                 Err(e) => Err(Status::internal(e.to_string())),
             }

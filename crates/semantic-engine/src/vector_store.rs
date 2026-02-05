@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use rand_pcg::Pcg64;
 
-const HUGGINGFACE_API_URL: &str = "https://api-inference.huggingface.co/pipeline/feature-extraction";
+const HUGGINGFACE_API_URL: &str = "https://router.huggingface.co/hf-inference/models";
 const DEFAULT_MODEL: &str = "sentence-transformers/all-MiniLM-L6-v2"; // 384 dims, fast
 
 /// Euclidean distance metric for HNSW
@@ -75,7 +75,7 @@ impl VectorStore {
 
     /// Generate embedding for a text using HuggingFace Inference API
     pub async fn embed(&self, text: &str) -> Result<[f32; 384]> {
-        let url = format!("{}/{}", HUGGINGFACE_API_URL, self.model);
+        let url = format!("{}/{}/pipeline/feature-extraction", HUGGINGFACE_API_URL, self.model);
         
         let mut request = self.client
             .post(&url)

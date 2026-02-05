@@ -20,6 +20,7 @@ Synapse is not just a database; it is a **Neuro-symbolic Brain**. It provides:
 - [x] Implement gRPC interface for multi-language support.
 - [x] **New**: Native MCP (stdio) support for direct LLM usage.
 - [x] Rebrand from Grafoso to Synapse.
+- [x] **Multi-Tenant Architecture**: Dynamic namespace support for context separation (Work, Personal, OS).
 
 ### Phase 2: Knowledge Ingestion 🏗️
 - [ ] **Smart Extractor**: LLM-driven pipeline to turn documentation into triples.

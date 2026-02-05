@@ -27,6 +27,7 @@ reasonable = "0.3.2"
 oxrdf = "0.2"
 oxigraph = "0.3"
 anyhow = "1.0"
+dashmap = "5.5"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }  # For HuggingFace API
 
 # Vector search dependencies (lightweight)
