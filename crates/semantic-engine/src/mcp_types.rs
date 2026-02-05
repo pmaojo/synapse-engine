@@ -51,4 +51,3 @@ pub struct Content {
     pub content_type: String,
     pub text: String,
 }
-

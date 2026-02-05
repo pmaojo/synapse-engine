@@ -44,13 +44,23 @@ impl NamespaceAuth {
     }
 
     /// Register a token with access to specific namespaces
-    pub fn register_token(&self, token: &str, namespaces: Vec<String>, permissions: NamespacePermission) {
+    pub fn register_token(
+        &self,
+        token: &str,
+        namespaces: Vec<String>,
+        permissions: NamespacePermission,
+    ) {
         let mut tokens = self.tokens.write().unwrap();
         tokens.insert(token.to_string(), (namespaces, permissions));
     }
 
     /// Check if token has permission for namespace and operation
-    pub fn check(&self, token: Option<&str>, namespace: &str, operation: &str) -> Result<(), String> {
+    pub fn check(
+        &self,
+        token: Option<&str>,
+        namespace: &str,
+        operation: &str,
+    ) -> Result<(), String> {
         // Anonymous access to default namespace
         if token.is_none() && namespace == "default" && self.allow_anonymous_default {
             return Ok(());
@@ -58,15 +68,18 @@ impl NamespaceAuth {
 
         let token = token.ok_or("Authentication required")?;
         let tokens = self.tokens.read().unwrap();
-        
-        let (patterns, perms) = tokens.get(token)
-            .ok_or("Invalid token")?;
+
+        let (patterns, perms) = tokens.get(token).ok_or("Invalid token")?;
 
         // Check namespace pattern match
         let ns_match = patterns.iter().any(|p| {
-            if p == "*" { true }
-            else if p.ends_with('*') { namespace.starts_with(&p[..p.len()-1]) }
-            else { p == namespace }
+            if p == "*" {
+                true
+            } else if p.ends_with('*') {
+                namespace.starts_with(&p[..p.len() - 1])
+            } else {
+                p == namespace
+            }
         });
 
         if !ns_match {
@@ -86,9 +99,32 @@ impl NamespaceAuth {
     /// Load tokens from environment variable (JSON format)
     pub fn load_from_env(&self) {
         if let Ok(json) = std::env::var("SYNAPSE_AUTH_TOKENS") {
-            if let Ok(map) = serde_json::from_str::<HashMap<String, Vec<String>>>(&json) {
-                for (token, namespaces) in map {
-                    self.register_token(&token, namespaces, NamespacePermission::default());
+            // Try parsing as complex object first: {"token": {"namespaces": [...], "permissions": {...}}}
+            if let Ok(map) = serde_json::from_str::<HashMap<String, serde_json::Value>>(&json) {
+                for (token, value) in map {
+                    if let Ok(namespaces) = serde_json::from_value::<Vec<String>>(value.clone()) {
+                        // Legacy format: value is list of namespaces
+                        self.register_token(&token, namespaces, NamespacePermission::default());
+                    } else if let Some(obj) = value.as_object() {
+                        // Complex format
+                        let namespaces = obj
+                            .get("namespaces")
+                            .and_then(|v| serde_json::from_value::<Vec<String>>(v.clone()).ok())
+                            .unwrap_or_default();
+
+                        let permissions = if let Some(p) = obj.get("permissions") {
+                            NamespacePermission {
+                                read: p.get("read").and_then(|v| v.as_bool()).unwrap_or(true),
+                                write: p.get("write").and_then(|v| v.as_bool()).unwrap_or(true),
+                                delete: p.get("delete").and_then(|v| v.as_bool()).unwrap_or(true),
+                                reason: p.get("reason").and_then(|v| v.as_bool()).unwrap_or(true),
+                            }
+                        } else {
+                            NamespacePermission::default()
+                        };
+
+                        self.register_token(&token, namespaces, permissions);
+                    }
                 }
             }
         }
