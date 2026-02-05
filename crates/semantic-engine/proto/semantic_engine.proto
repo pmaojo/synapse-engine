@@ -79,9 +79,10 @@ message IngestResponse {
 message NodeRequest {
     uint32 node_id = 1;
     string namespace = 2;
-    string direction = 3;    // "outgoing", "incoming", or "both" (default: "outgoing")
-    uint32 depth = 4;        // Traversal depth (default: 1)
-    string edge_filter = 5;  // Optional: filter by edge type (predicate)
+    string direction = 3;       // "outgoing", "incoming", or "both" (default: "outgoing")
+    uint32 depth = 4;           // Traversal depth (default: 1)
+    string edge_filter = 5;     // Optional: filter by edge type (predicate)
+    uint32 limit_per_layer = 6; // Max neighbors per depth level (0 = unlimited)
 }
 
 message NeighborResponse {
@@ -93,6 +94,8 @@ message Neighbor {
     string edge_type = 2;
     string uri = 3;           // Full URI of the neighbor
     string direction = 4;     // "outgoing" or "incoming"
+    uint32 depth = 5;         // Depth at which this neighbor was found
+    float score = 6;          // Path score (1.0 / depth by default)
 }
 
 message SearchRequest {
