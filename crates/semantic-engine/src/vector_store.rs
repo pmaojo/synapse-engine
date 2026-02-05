@@ -261,4 +261,73 @@ impl VectorStore {
     pub fn is_empty(&self) -> bool {
         self.len() == 0
     }
+
+    /// Compaction: rebuild index from stored embeddings, removing stale entries
+    pub fn compact(&self) -> Result<usize> {
+        let embeddings = self.embeddings.read().unwrap();
+        let current_uris: std::collections::HashSet<_> = self.uri_to_id.read().unwrap().keys().cloned().collect();
+        
+        // Filter to only current URIs
+        let active_entries: Vec<_> = embeddings.iter()
+            .filter(|e| current_uris.contains(&e.uri))
+            .cloned()
+            .collect();
+
+        let removed = embeddings.len() - active_entries.len();
+        
+        if removed == 0 {
+            return Ok(0);
+        }
+
+        // Rebuild index
+        let mut new_index = hnsw::Hnsw::new(Euclidian);
+        let mut new_id_to_uri = std::collections::HashMap::new();
+        let mut new_uri_to_id = std::collections::HashMap::new();
+        let mut searcher = hnsw::Searcher::default();
+
+        for entry in &active_entries {
+            if entry.embedding.len() == 384 {
+                let mut emb = [0.0f32; 384];
+                emb.copy_from_slice(&entry.embedding);
+                let id = new_index.insert(emb, &mut searcher);
+                new_id_to_uri.insert(id, entry.uri.clone());
+                new_uri_to_id.insert(entry.uri.clone(), id);
+            }
+        }
+
+        // Swap in new index
+        *self.index.write().unwrap() = new_index;
+        *self.id_to_uri.write().unwrap() = new_id_to_uri;
+        *self.uri_to_id.write().unwrap() = new_uri_to_id;
+        
+        // Update embeddings (drop takes write lock)
+        drop(embeddings);
+        *self.embeddings.write().unwrap() = active_entries;
+        
+        let _ = self.save_vectors();
+        
+        Ok(removed)
+    }
+
+    /// Remove a URI from the vector store
+    pub fn remove(&self, uri: &str) -> bool {
+        let mut uri_map = self.uri_to_id.write().unwrap();
+        let mut id_map = self.id_to_uri.write().unwrap();
+
+        if let Some(id) = uri_map.remove(uri) {
+            id_map.remove(&id);
+            // Note: actual index entry remains until compaction
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Get storage stats
+    pub fn stats(&self) -> (usize, usize, usize) {
+        let embeddings_count = self.embeddings.read().unwrap().len();
+        let active_count = self.uri_to_id.read().unwrap().len();
+        let stale_count = embeddings_count.saturating_sub(active_count);
+        (active_count, stale_count, embeddings_count)
+    }
 }

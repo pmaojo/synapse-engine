@@ -1,6 +1,6 @@
 ========================================
 SYNAPSE CODEBASE EXTRACTION
-Generated: Thu Feb  5 01:19:17 WET 2026
+Generated: Thu Feb  5 01:27:16 WET 2026
 ========================================
 
 
@@ -89,6 +89,321 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     Ok(())
+}
+
+
+========================================
+FILE: crates/semantic-engine/src/audit.rs
+========================================
+
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::sync::RwLock;
+
+/// Record of an inference operation
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InferenceRecord {
+    pub timestamp: DateTime<Utc>,
+    pub namespace: String,
+    pub strategy: String,
+    pub input_triples: usize,
+    pub inferred_triples: usize,
+    pub duplicates_skipped: usize,
+    pub sample_inferences: Vec<(String, String, String)>,
+}
+
+/// Audit trail for tracking inference operations
+pub struct InferenceAudit {
+    /// Namespace -> inference records
+    records: RwLock<HashMap<String, Vec<InferenceRecord>>>,
+    /// Maximum records per namespace
+    max_records: usize,
+}
+
+impl Default for InferenceAudit {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl InferenceAudit {
+    pub fn new() -> Self {
+        Self {
+            records: RwLock::new(HashMap::new()),
+            max_records: 100,
+        }
+    }
+
+    /// Log an inference operation
+    pub fn log(&self, namespace: &str, strategy: &str, input: usize, inferred: usize, skipped: usize, samples: Vec<(String, String, String)>) {
+        let record = InferenceRecord {
+            timestamp: Utc::now(),
+            namespace: namespace.to_string(),
+            strategy: strategy.to_string(),
+            input_triples: input,
+            inferred_triples: inferred,
+            duplicates_skipped: skipped,
+            sample_inferences: samples.into_iter().take(10).collect(),
+        };
+
+        let mut records = self.records.write().unwrap();
+        let ns_records = records.entry(namespace.to_string()).or_insert_with(Vec::new);
+        
+        ns_records.push(record);
+        
+        // Trim to max records
+        if ns_records.len() > self.max_records {
+            ns_records.remove(0);
+        }
+    }
+
+    /// Get inference history for a namespace
+    pub fn get_history(&self, namespace: &str) -> Vec<InferenceRecord> {
+        let records = self.records.read().unwrap();
+        records.get(namespace).cloned().unwrap_or_default()
+    }
+
+    /// Get last inference for a namespace
+    pub fn get_last(&self, namespace: &str) -> Option<InferenceRecord> {
+        let records = self.records.read().unwrap();
+        records.get(namespace).and_then(|r| r.last().cloned())
+    }
+
+    /// Export all records as JSON
+    pub fn export_json(&self) -> String {
+        let records = self.records.read().unwrap();
+        serde_json::to_string_pretty(&*records).unwrap_or_default()
+    }
+}
+
+
+========================================
+FILE: crates/semantic-engine/src/auth.rs
+========================================
+
+use std::collections::HashMap;
+use std::sync::RwLock;
+
+/// Namespace access control
+#[derive(Debug, Clone)]
+pub struct NamespacePermission {
+    pub read: bool,
+    pub write: bool,
+    pub delete: bool,
+    pub reason: bool,
+}
+
+impl Default for NamespacePermission {
+    fn default() -> Self {
+        Self {
+            read: true,
+            write: true,
+            delete: true,
+            reason: true,
+        }
+    }
+}
+
+/// Auth layer for namespace-based access control
+pub struct NamespaceAuth {
+    /// Token -> (namespace patterns, permissions)
+    tokens: RwLock<HashMap<String, (Vec<String>, NamespacePermission)>>,
+    /// Allow unauthenticated access to "default" namespace
+    pub allow_anonymous_default: bool,
+}
+
+impl Default for NamespaceAuth {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl NamespaceAuth {
+    pub fn new() -> Self {
+        Self {
+            tokens: RwLock::new(HashMap::new()),
+            allow_anonymous_default: true,
+        }
+    }
+
+    /// Register a token with access to specific namespaces
+    pub fn register_token(&self, token: &str, namespaces: Vec<String>, permissions: NamespacePermission) {
+        let mut tokens = self.tokens.write().unwrap();
+        tokens.insert(token.to_string(), (namespaces, permissions));
+    }
+
+    /// Check if token has permission for namespace and operation
+    pub fn check(&self, token: Option<&str>, namespace: &str, operation: &str) -> Result<(), String> {
+        // Anonymous access to default namespace
+        if token.is_none() && namespace == "default" && self.allow_anonymous_default {
+            return Ok(());
+        }
+
+        let token = token.ok_or("Authentication required")?;
+        let tokens = self.tokens.read().unwrap();
+        
+        let (patterns, perms) = tokens.get(token)
+            .ok_or("Invalid token")?;
+
+        // Check namespace pattern match
+        let ns_match = patterns.iter().any(|p| {
+            if p == "*" { true }
+            else if p.ends_with('*') { namespace.starts_with(&p[..p.len()-1]) }
+            else { p == namespace }
+        });
+
+        if !ns_match {
+            return Err(format!("Token not authorized for namespace: {}", namespace));
+        }
+
+        // Check operation permission
+        match operation {
+            "read" if !perms.read => Err("Read permission denied".to_string()),
+            "write" if !perms.write => Err("Write permission denied".to_string()),
+            "delete" if !perms.delete => Err("Delete permission denied".to_string()),
+            "reason" if !perms.reason => Err("Reasoning permission denied".to_string()),
+            _ => Ok(()),
+        }
+    }
+
+    /// Load tokens from environment variable (JSON format)
+    pub fn load_from_env(&self) {
+        if let Ok(json) = std::env::var("SYNAPSE_AUTH_TOKENS") {
+            if let Ok(map) = serde_json::from_str::<HashMap<String, Vec<String>>>(&json) {
+                for (token, namespaces) in map {
+                    self.register_token(&token, namespaces, NamespacePermission::default());
+                }
+            }
+        }
+    }
+}
+
+
+========================================
+FILE: crates/semantic-engine/src/disambiguation.rs
+========================================
+
+/// Entity disambiguation using string similarity and graph context
+
+/// Entity disambiguation using string similarity and graph context
+pub struct EntityDisambiguator {
+    /// Similarity threshold (0.0 - 1.0)
+    threshold: f64,
+}
+
+impl Default for EntityDisambiguator {
+    fn default() -> Self {
+        Self::new(0.8)
+    }
+}
+
+impl EntityDisambiguator {
+    pub fn new(threshold: f64) -> Self {
+        Self { threshold }
+    }
+
+    /// Find similar URIs in the store based on label similarity
+    pub fn find_similar(&self, uri: &str, candidates: &[String]) -> Vec<(String, f64)> {
+        let uri_label = Self::extract_label(uri);
+        
+        let mut matches: Vec<(String, f64)> = candidates.iter()
+            .filter_map(|c| {
+                let candidate_label = Self::extract_label(c);
+                let sim = Self::levenshtein_similarity(&uri_label, &candidate_label);
+                if sim >= self.threshold {
+                    Some((c.clone(), sim))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        matches.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        matches
+    }
+
+    /// Extract the label part from a URI
+    fn extract_label(uri: &str) -> String {
+        // Handle common URI formats
+        let uri = uri.trim_matches(|c| c == '<' || c == '>');
+        
+        if let Some(idx) = uri.rfind('/') {
+            uri[idx+1..].to_string()
+        } else if let Some(idx) = uri.rfind('#') {
+            uri[idx+1..].to_string()
+        } else {
+            uri.to_string()
+        }
+    }
+
+    /// Calculate Levenshtein similarity (0.0 - 1.0)
+    fn levenshtein_similarity(a: &str, b: &str) -> f64 {
+        if a.is_empty() && b.is_empty() {
+            return 1.0;
+        }
+        if a.is_empty() || b.is_empty() {
+            return 0.0;
+        }
+
+        let a_lower = a.to_lowercase();
+        let b_lower = b.to_lowercase();
+
+        let len_a = a_lower.chars().count();
+        let len_b = b_lower.chars().count();
+        let max_len = len_a.max(len_b);
+
+        let distance = Self::levenshtein_distance(&a_lower, &b_lower);
+        1.0 - (distance as f64 / max_len as f64)
+    }
+
+    /// Calculate Levenshtein edit distance
+    fn levenshtein_distance(a: &str, b: &str) -> usize {
+        let a_chars: Vec<char> = a.chars().collect();
+        let b_chars: Vec<char> = b.chars().collect();
+        
+        let m = a_chars.len();
+        let n = b_chars.len();
+        
+        if m == 0 { return n; }
+        if n == 0 { return m; }
+
+        let mut prev: Vec<usize> = (0..=n).collect();
+        let mut curr = vec![0; n + 1];
+
+        for i in 1..=m {
+            curr[0] = i;
+            for j in 1..=n {
+                let cost = if a_chars[i-1] == b_chars[j-1] { 0 } else { 1 };
+                curr[j] = (prev[j] + 1)
+                    .min(curr[j-1] + 1)
+                    .min(prev[j-1] + cost);
+            }
+            std::mem::swap(&mut prev, &mut curr);
+        }
+        
+        prev[n]
+    }
+
+    /// Suggest merges for similar entities
+    pub fn suggest_merges(&self, uris: &[String]) -> Vec<(String, String, f64)> {
+        let mut suggestions = Vec::new();
+        
+        for i in 0..uris.len() {
+            for j in (i+1)..uris.len() {
+                let label_a = Self::extract_label(&uris[i]);
+                let label_b = Self::extract_label(&uris[j]);
+                let sim = Self::levenshtein_similarity(&label_a, &label_b);
+                
+                if sim >= self.threshold {
+                    suggestions.push((uris[i].clone(), uris[j].clone(), sim));
+                }
+            }
+        }
+        
+        suggestions.sort_by(|a, b| b.2.partial_cmp(&a.2).unwrap_or(std::cmp::Ordering::Equal));
+        suggestions
+    }
 }
 
 
@@ -256,6 +571,9 @@ pub mod vector_store;
 pub mod reasoner;
 pub mod mcp_types;
 pub mod ingest;
+pub mod auth;
+pub mod audit;
+pub mod disambiguation;
 
 
 ========================================
@@ -485,6 +803,37 @@ impl McpStdioServer {
                     "required": ["uri", "content"]
                 }),
             },
+            Tool {
+                name: "compact_vectors".to_string(),
+                description: Some("Compact the vector index by removing stale entries".to_string()),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "namespace": { "type": "string", "default": "default" }
+                    }
+                }),
+            },
+            Tool {
+                name: "vector_stats".to_string(),
+                description: Some("Get vector store statistics (active, stale, total)".to_string()),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "namespace": { "type": "string", "default": "default" }
+                    }
+                }),
+            },
+            Tool {
+                name: "disambiguate".to_string(),
+                description: Some("Find similar entities that might be duplicates".to_string()),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "namespace": { "type": "string", "default": "default" },
+                        "threshold": { "type": "number", "default": 0.8, "description": "Similarity threshold 0.0-1.0" }
+                    }
+                }),
+            },
         ]
     }
 
@@ -572,6 +921,9 @@ impl McpStdioServer {
             "delete_namespace" => self.call_delete_namespace(request.id, &arguments).await,
             "ingest_url" => self.call_ingest_url(request.id, &arguments).await,
             "ingest_text" => self.call_ingest_text(request.id, &arguments).await,
+            "compact_vectors" => self.call_compact_vectors(request.id, &arguments).await,
+            "vector_stats" => self.call_vector_stats(request.id, &arguments).await,
+            "disambiguate" => self.call_disambiguate(request.id, &arguments).await,
             _ => self.error_response(request.id, -32602, &format!("Unknown tool: {}", tool_name)),
         }
     }
@@ -930,6 +1282,87 @@ impl McpStdioServer {
         }
     }
 
+    async fn call_compact_vectors(
+        &self,
+        id: Option<serde_json::Value>,
+        args: &serde_json::Map<String, serde_json::Value>,
+    ) -> McpResponse {
+        let namespace = args.get("namespace").and_then(|v| v.as_str()).unwrap_or("default");
+
+        let store = match self.engine.get_store(namespace) {
+            Ok(s) => s,
+            Err(e) => return self.tool_result(id, &e.to_string(), true),
+        };
+
+        if let Some(ref vector_store) = store.vector_store {
+            match vector_store.compact() {
+                Ok(removed) => self.tool_result(id, &format!("Compaction complete: {} stale entries removed", removed), false),
+                Err(e) => self.tool_result(id, &format!("Compaction error: {}", e), true),
+            }
+        } else {
+            self.tool_result(id, "Vector store not available", true)
+        }
+    }
+
+    async fn call_vector_stats(
+        &self,
+        id: Option<serde_json::Value>,
+        args: &serde_json::Map<String, serde_json::Value>,
+    ) -> McpResponse {
+        let namespace = args.get("namespace").and_then(|v| v.as_str()).unwrap_or("default");
+
+        let store = match self.engine.get_store(namespace) {
+            Ok(s) => s,
+            Err(e) => return self.tool_result(id, &e.to_string(), true),
+        };
+
+        if let Some(ref vector_store) = store.vector_store {
+            let (active, stale, total) = vector_store.stats();
+            let msg = format!(
+                "Vector store stats:\n  Active: {}\n  Stale: {}\n  Total embeddings: {}",
+                active, stale, total
+            );
+            self.tool_result(id, &msg, false)
+        } else {
+            self.tool_result(id, "Vector store not available", true)
+        }
+    }
+
+    async fn call_disambiguate(
+        &self,
+        id: Option<serde_json::Value>,
+        args: &serde_json::Map<String, serde_json::Value>,
+    ) -> McpResponse {
+        let namespace = args.get("namespace").and_then(|v| v.as_str()).unwrap_or("default");
+        let threshold = args.get("threshold").and_then(|v| v.as_f64()).unwrap_or(0.8);
+
+        let store = match self.engine.get_store(namespace) {
+            Ok(s) => s,
+            Err(e) => return self.tool_result(id, &e.to_string(), true),
+        };
+
+        // Collect all URIs from the store
+        let uri_map = store.uri_to_id.read().unwrap();
+        let uris: Vec<String> = uri_map.keys().cloned().collect();
+        drop(uri_map);
+
+        let disambiguator = crate::disambiguation::EntityDisambiguator::new(threshold);
+        let suggestions = disambiguator.suggest_merges(&uris);
+
+        if suggestions.is_empty() {
+            self.tool_result(id, "No similar entities found above threshold", false)
+        } else {
+            let mut msg = format!("Found {} potential duplicates:\n", suggestions.len());
+            for (uri1, uri2, sim) in suggestions.iter().take(20) {
+                msg.push_str(&format!("  {:.2}%: {} <-> {}\n", sim * 100.0, uri1, uri2));
+            }
+            if suggestions.len() > 20 {
+                msg.push_str(&format!("  ... and {} more\n", suggestions.len() - 20));
+            }
+            self.tool_result(id, &msg, false)
+        }
+    }
+
     // Legacy handlers for backward compatibility
     async fn handle_legacy_ingest(&self, request: McpRequest) -> McpResponse {
         let params = match request.params {
@@ -1248,14 +1681,85 @@ pub enum ReasoningStrategy {
     OWLRL,
 }
 
+/// Selectable reasoning rules for fine-grained control
+#[derive(Debug, Clone, Default)]
+pub struct RuleSet {
+    pub subclass_transitivity: bool,
+    pub subproperty_transitivity: bool,
+    pub domain_range: bool,
+    pub inverse_of: bool,
+    pub symmetric_property: bool,
+    pub transitive_property: bool,
+}
+
+impl RuleSet {
+    /// All RDFS rules enabled
+    pub fn rdfs() -> Self {
+        Self {
+            subclass_transitivity: true,
+            subproperty_transitivity: true,
+            domain_range: true,
+            inverse_of: false,
+            symmetric_property: false,
+            transitive_property: false,
+        }
+    }
+
+    /// All OWL-RL rules enabled
+    pub fn owlrl() -> Self {
+        Self {
+            subclass_transitivity: true,
+            subproperty_transitivity: true,
+            domain_range: true,
+            inverse_of: true,
+            symmetric_property: true,
+            transitive_property: true,
+        }
+    }
+
+    /// Parse from comma-separated rule names
+    pub fn from_str(rules: &str) -> Self {
+        let mut ruleset = Self::default();
+        for rule in rules.split(',').map(|s| s.trim().to_lowercase()) {
+            match rule.as_str() {
+                "subclass" | "subclass_transitivity" => ruleset.subclass_transitivity = true,
+                "subproperty" | "subproperty_transitivity" => ruleset.subproperty_transitivity = true,
+                "domain_range" | "dr" => ruleset.domain_range = true,
+                "inverse" | "inverse_of" => ruleset.inverse_of = true,
+                "symmetric" | "symmetric_property" => ruleset.symmetric_property = true,
+                "transitive" | "transitive_property" => ruleset.transitive_property = true,
+                "rdfs" => ruleset = Self::rdfs(),
+                "owlrl" | "owl-rl" => ruleset = Self::owlrl(),
+                _ => {}
+            }
+        }
+        ruleset
+    }
+}
+
 /// Reasoner for deriving implicit knowledge from RDF triples
 pub struct SynapseReasoner {
     strategy: ReasoningStrategy,
+    rules: RuleSet,
 }
 
 impl SynapseReasoner {
     pub fn new(strategy: ReasoningStrategy) -> Self {
-        Self { strategy }
+        let rules = match strategy {
+            ReasoningStrategy::RDFS => RuleSet::rdfs(),
+            ReasoningStrategy::OWLRL => RuleSet::owlrl(),
+            ReasoningStrategy::None => RuleSet::default(),
+        };
+        Self { strategy, rules }
+    }
+
+    pub fn with_rules(strategy: ReasoningStrategy, rules: RuleSet) -> Self {
+        Self { strategy, rules }
+    }
+
+    /// Get current rule configuration
+    pub fn rules(&self) -> &RuleSet {
+        &self.rules
     }
 
     /// Apply reasoning to the store and return inferred triples
@@ -2296,6 +2800,75 @@ impl VectorStore {
 
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    /// Compaction: rebuild index from stored embeddings, removing stale entries
+    pub fn compact(&self) -> Result<usize> {
+        let embeddings = self.embeddings.read().unwrap();
+        let current_uris: std::collections::HashSet<_> = self.uri_to_id.read().unwrap().keys().cloned().collect();
+        
+        // Filter to only current URIs
+        let active_entries: Vec<_> = embeddings.iter()
+            .filter(|e| current_uris.contains(&e.uri))
+            .cloned()
+            .collect();
+
+        let removed = embeddings.len() - active_entries.len();
+        
+        if removed == 0 {
+            return Ok(0);
+        }
+
+        // Rebuild index
+        let mut new_index = hnsw::Hnsw::new(Euclidian);
+        let mut new_id_to_uri = std::collections::HashMap::new();
+        let mut new_uri_to_id = std::collections::HashMap::new();
+        let mut searcher = hnsw::Searcher::default();
+
+        for entry in &active_entries {
+            if entry.embedding.len() == 384 {
+                let mut emb = [0.0f32; 384];
+                emb.copy_from_slice(&entry.embedding);
+                let id = new_index.insert(emb, &mut searcher);
+                new_id_to_uri.insert(id, entry.uri.clone());
+                new_uri_to_id.insert(entry.uri.clone(), id);
+            }
+        }
+
+        // Swap in new index
+        *self.index.write().unwrap() = new_index;
+        *self.id_to_uri.write().unwrap() = new_id_to_uri;
+        *self.uri_to_id.write().unwrap() = new_uri_to_id;
+        
+        // Update embeddings (drop takes write lock)
+        drop(embeddings);
+        *self.embeddings.write().unwrap() = active_entries;
+        
+        let _ = self.save_vectors();
+        
+        Ok(removed)
+    }
+
+    /// Remove a URI from the vector store
+    pub fn remove(&self, uri: &str) -> bool {
+        let mut uri_map = self.uri_to_id.write().unwrap();
+        let mut id_map = self.id_to_uri.write().unwrap();
+
+        if let Some(id) = uri_map.remove(uri) {
+            id_map.remove(&id);
+            // Note: actual index entry remains until compaction
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Get storage stats
+    pub fn stats(&self) -> (usize, usize, usize) {
+        let embeddings_count = self.embeddings.read().unwrap().len();
+        let active_count = self.uri_to_id.read().unwrap().len();
+        let stale_count = embeddings_count.saturating_sub(active_count);
+        (active_count, stale_count, embeddings_count)
     }
 }
 

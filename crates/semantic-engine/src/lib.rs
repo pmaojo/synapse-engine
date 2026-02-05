@@ -7,3 +7,6 @@ pub mod vector_store;
 pub mod reasoner;
 pub mod mcp_types;
 pub mod ingest;
+pub mod auth;
+pub mod audit;
+pub mod disambiguation;

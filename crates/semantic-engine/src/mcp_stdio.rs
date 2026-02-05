@@ -181,6 +181,37 @@ impl McpStdioServer {
                     "required": ["uri", "content"]
                 }),
             },
+            Tool {
+                name: "compact_vectors".to_string(),
+                description: Some("Compact the vector index by removing stale entries".to_string()),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "namespace": { "type": "string", "default": "default" }
+                    }
+                }),
+            },
+            Tool {
+                name: "vector_stats".to_string(),
+                description: Some("Get vector store statistics (active, stale, total)".to_string()),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "namespace": { "type": "string", "default": "default" }
+                    }
+                }),
+            },
+            Tool {
+                name: "disambiguate".to_string(),
+                description: Some("Find similar entities that might be duplicates".to_string()),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "namespace": { "type": "string", "default": "default" },
+                        "threshold": { "type": "number", "default": 0.8, "description": "Similarity threshold 0.0-1.0" }
+                    }
+                }),
+            },
         ]
     }
 
@@ -268,6 +299,9 @@ impl McpStdioServer {
             "delete_namespace" => self.call_delete_namespace(request.id, &arguments).await,
             "ingest_url" => self.call_ingest_url(request.id, &arguments).await,
             "ingest_text" => self.call_ingest_text(request.id, &arguments).await,
+            "compact_vectors" => self.call_compact_vectors(request.id, &arguments).await,
+            "vector_stats" => self.call_vector_stats(request.id, &arguments).await,
+            "disambiguate" => self.call_disambiguate(request.id, &arguments).await,
             _ => self.error_response(request.id, -32602, &format!("Unknown tool: {}", tool_name)),
         }
     }
@@ -623,6 +657,87 @@ impl McpStdioServer {
             }
         } else {
             self.tool_result(id, "Vector store not available", true)
+        }
+    }
+
+    async fn call_compact_vectors(
+        &self,
+        id: Option<serde_json::Value>,
+        args: &serde_json::Map<String, serde_json::Value>,
+    ) -> McpResponse {
+        let namespace = args.get("namespace").and_then(|v| v.as_str()).unwrap_or("default");
+
+        let store = match self.engine.get_store(namespace) {
+            Ok(s) => s,
+            Err(e) => return self.tool_result(id, &e.to_string(), true),
+        };
+
+        if let Some(ref vector_store) = store.vector_store {
+            match vector_store.compact() {
+                Ok(removed) => self.tool_result(id, &format!("Compaction complete: {} stale entries removed", removed), false),
+                Err(e) => self.tool_result(id, &format!("Compaction error: {}", e), true),
+            }
+        } else {
+            self.tool_result(id, "Vector store not available", true)
+        }
+    }
+
+    async fn call_vector_stats(
+        &self,
+        id: Option<serde_json::Value>,
+        args: &serde_json::Map<String, serde_json::Value>,
+    ) -> McpResponse {
+        let namespace = args.get("namespace").and_then(|v| v.as_str()).unwrap_or("default");
+
+        let store = match self.engine.get_store(namespace) {
+            Ok(s) => s,
+            Err(e) => return self.tool_result(id, &e.to_string(), true),
+        };
+
+        if let Some(ref vector_store) = store.vector_store {
+            let (active, stale, total) = vector_store.stats();
+            let msg = format!(
+                "Vector store stats:\n  Active: {}\n  Stale: {}\n  Total embeddings: {}",
+                active, stale, total
+            );
+            self.tool_result(id, &msg, false)
+        } else {
+            self.tool_result(id, "Vector store not available", true)
+        }
+    }
+
+    async fn call_disambiguate(
+        &self,
+        id: Option<serde_json::Value>,
+        args: &serde_json::Map<String, serde_json::Value>,
+    ) -> McpResponse {
+        let namespace = args.get("namespace").and_then(|v| v.as_str()).unwrap_or("default");
+        let threshold = args.get("threshold").and_then(|v| v.as_f64()).unwrap_or(0.8);
+
+        let store = match self.engine.get_store(namespace) {
+            Ok(s) => s,
+            Err(e) => return self.tool_result(id, &e.to_string(), true),
+        };
+
+        // Collect all URIs from the store
+        let uri_map = store.uri_to_id.read().unwrap();
+        let uris: Vec<String> = uri_map.keys().cloned().collect();
+        drop(uri_map);
+
+        let disambiguator = crate::disambiguation::EntityDisambiguator::new(threshold);
+        let suggestions = disambiguator.suggest_merges(&uris);
+
+        if suggestions.is_empty() {
+            self.tool_result(id, "No similar entities found above threshold", false)
+        } else {
+            let mut msg = format!("Found {} potential duplicates:\n", suggestions.len());
+            for (uri1, uri2, sim) in suggestions.iter().take(20) {
+                msg.push_str(&format!("  {:.2}%: {} <-> {}\n", sim * 100.0, uri1, uri2));
+            }
+            if suggestions.len() > 20 {
+                msg.push_str(&format!("  ... and {} more\n", suggestions.len() - 20));
+            }
+            self.tool_result(id, &msg, false)
         }
     }
 

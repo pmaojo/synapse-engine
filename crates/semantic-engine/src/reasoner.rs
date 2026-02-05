@@ -11,14 +11,85 @@ pub enum ReasoningStrategy {
     OWLRL,
 }
 
+/// Selectable reasoning rules for fine-grained control
+#[derive(Debug, Clone, Default)]
+pub struct RuleSet {
+    pub subclass_transitivity: bool,
+    pub subproperty_transitivity: bool,
+    pub domain_range: bool,
+    pub inverse_of: bool,
+    pub symmetric_property: bool,
+    pub transitive_property: bool,
+}
+
+impl RuleSet {
+    /// All RDFS rules enabled
+    pub fn rdfs() -> Self {
+        Self {
+            subclass_transitivity: true,
+            subproperty_transitivity: true,
+            domain_range: true,
+            inverse_of: false,
+            symmetric_property: false,
+            transitive_property: false,
+        }
+    }
+
+    /// All OWL-RL rules enabled
+    pub fn owlrl() -> Self {
+        Self {
+            subclass_transitivity: true,
+            subproperty_transitivity: true,
+            domain_range: true,
+            inverse_of: true,
+            symmetric_property: true,
+            transitive_property: true,
+        }
+    }
+
+    /// Parse from comma-separated rule names
+    pub fn from_str(rules: &str) -> Self {
+        let mut ruleset = Self::default();
+        for rule in rules.split(',').map(|s| s.trim().to_lowercase()) {
+            match rule.as_str() {
+                "subclass" | "subclass_transitivity" => ruleset.subclass_transitivity = true,
+                "subproperty" | "subproperty_transitivity" => ruleset.subproperty_transitivity = true,
+                "domain_range" | "dr" => ruleset.domain_range = true,
+                "inverse" | "inverse_of" => ruleset.inverse_of = true,
+                "symmetric" | "symmetric_property" => ruleset.symmetric_property = true,
+                "transitive" | "transitive_property" => ruleset.transitive_property = true,
+                "rdfs" => ruleset = Self::rdfs(),
+                "owlrl" | "owl-rl" => ruleset = Self::owlrl(),
+                _ => {}
+            }
+        }
+        ruleset
+    }
+}
+
 /// Reasoner for deriving implicit knowledge from RDF triples
 pub struct SynapseReasoner {
     strategy: ReasoningStrategy,
+    rules: RuleSet,
 }
 
 impl SynapseReasoner {
     pub fn new(strategy: ReasoningStrategy) -> Self {
-        Self { strategy }
+        let rules = match strategy {
+            ReasoningStrategy::RDFS => RuleSet::rdfs(),
+            ReasoningStrategy::OWLRL => RuleSet::owlrl(),
+            ReasoningStrategy::None => RuleSet::default(),
+        };
+        Self { strategy, rules }
+    }
+
+    pub fn with_rules(strategy: ReasoningStrategy, rules: RuleSet) -> Self {
+        Self { strategy, rules }
+    }
+
+    /// Get current rule configuration
+    pub fn rules(&self) -> &RuleSet {
+        &self.rules
     }
 
     /// Apply reasoning to the store and return inferred triples
