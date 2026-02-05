@@ -25,7 +25,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("Storage Path: {}", storage_path);
 
         Server::builder()
-            .add_service(SemanticEngineServer::new(engine))
+            .add_service(SemanticEngineServer::with_interceptor(engine, synapse_core::server::auth_interceptor))
             .serve(addr)
             .await?;
     }

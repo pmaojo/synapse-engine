@@ -9,16 +9,18 @@ use rand_pcg::Pcg64;
 
 const HUGGINGFACE_API_URL: &str = "https://router.huggingface.co/hf-inference/models";
 const DEFAULT_MODEL: &str = "sentence-transformers/all-MiniLM-L6-v2"; // 384 dims, fast
+const DEFAULT_DIMENSIONS: usize = 384;
 
 /// Euclidean distance metric for HNSW
 #[derive(Default, Clone)]
 pub struct Euclidian;
 
-impl space::Metric<[f32; 384]> for Euclidian {
+impl space::Metric<Vec<f32>> for Euclidian {
     type Unit = u64;
-    fn distance(&self, a: &[f32; 384], b: &[f32; 384]) -> u64 {
+    fn distance(&self, a: &Vec<f32>, b: &Vec<f32>) -> u64 {
+        let len = a.len().min(b.len());
         let mut dist_sq = 0.0;
-        for i in 0..384 {
+        for i in 0..len {
             let diff = a[i] - b[i];
             dist_sq += diff * diff;
         }
@@ -42,7 +44,7 @@ struct VectorEntry {
 /// Vector store using HuggingFace Inference API for embeddings
 pub struct VectorStore {
     /// HNSW index for fast approximate nearest neighbor search
-    index: Arc<RwLock<Hnsw<Euclidian, [f32; 384], Pcg64, 16, 32>>>,
+    index: Arc<RwLock<Hnsw<Euclidian, Vec<f32>, Pcg64, 16, 32>>>,
     /// Mapping from node ID to URI
     id_to_uri: Arc<RwLock<HashMap<usize, String>>>,
     /// Mapping from URI to node ID
@@ -55,6 +57,8 @@ pub struct VectorStore {
     api_token: Option<String>,
     /// Model name
     model: String,
+    /// Vector dimensions
+    dimensions: usize,
     /// Stored embeddings for persistence
     embeddings: Arc<RwLock<Vec<VectorEntry>>>,
 }
@@ -78,6 +82,12 @@ impl VectorStore {
         let storage_path = std::env::var("GRAPH_STORAGE_PATH")
             .ok()
             .map(|p| PathBuf::from(p).join(namespace));
+
+        // Get dimensions from env or default
+        let dimensions = std::env::var("VECTOR_DIMENSIONS")
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(DEFAULT_DIMENSIONS);
         
         // Create HNSW index with Euclidian metric
         let mut index = Hnsw::new(Euclidian);
@@ -93,16 +103,14 @@ impl VectorStore {
                     if let Ok(data) = serde_json::from_str::<VectorData>(&content) {
                         let mut searcher = hnsw::Searcher::default();
                         for entry in data.entries {
-                            if entry.embedding.len() == 384 {
-                                let mut emb = [0.0f32; 384];
-                                emb.copy_from_slice(&entry.embedding);
-                                let id = index.insert(emb, &mut searcher);
+                            if entry.embedding.len() == dimensions {
+                                let id = index.insert(entry.embedding.clone(), &mut searcher);
                                 id_to_uri.insert(id, entry.uri.clone());
                                 uri_to_id.insert(entry.uri.clone(), id);
                                 embeddings.push(entry);
                             }
                         }
-                        eprintln!("Loaded {} vectors from disk", embeddings.len());
+                        eprintln!("Loaded {} vectors from disk (dim={})", embeddings.len(), dimensions);
                     }
                 }
             }
@@ -119,6 +127,7 @@ impl VectorStore {
             client: Client::new(),
             api_token,
             model: DEFAULT_MODEL.to_string(),
+            dimensions,
             embeddings: Arc::new(RwLock::new(embeddings)),
         })
     }
@@ -137,7 +146,7 @@ impl VectorStore {
     }
 
     /// Generate embedding for a text using HuggingFace Inference API
-    pub async fn embed(&self, text: &str) -> Result<[f32; 384]> {
+    pub async fn embed(&self, text: &str) -> Result<Vec<f32>> {
         let url = format!("{}/{}/pipeline/feature-extraction", HUGGINGFACE_API_URL, self.model);
         
         let mut request = self.client
@@ -161,14 +170,11 @@ impl VectorStore {
         // Response is a Vec<f32> directly
         let embedding_vec: Vec<f32> = response.json().await?;
         
-        if embedding_vec.len() != 384 {
-            anyhow::bail!("Expected 384 dimensions, got {}", embedding_vec.len());
+        if embedding_vec.len() != self.dimensions {
+            anyhow::bail!("Expected {} dimensions, got {}", self.dimensions, embedding_vec.len());
         }
-
-        let mut embedding = [0.0f32; 384];
-        embedding.copy_from_slice(&embedding_vec[0..384]);
         
-        Ok(embedding)
+        Ok(embedding_vec)
     }
 
     /// Add a URI with its text content to the index
@@ -188,7 +194,7 @@ impl VectorStore {
         let mut searcher = hnsw::Searcher::default();
         let id = {
             let mut index = self.index.write().unwrap();
-            index.insert(embedding, &mut searcher)
+            index.insert(embedding.clone(), &mut searcher)
         };
 
         // Update mappings
@@ -204,7 +210,7 @@ impl VectorStore {
             let mut embs = self.embeddings.write().unwrap();
             embs.push(VectorEntry {
                 uri: uri.to_string(),
-                embedding: embedding.to_vec(),
+                embedding: embedding,
             });
         }
         let _ = self.save_vectors(); // Best effort persistence
@@ -267,6 +273,13 @@ impl VectorStore {
         let embeddings = self.embeddings.read().unwrap();
         let current_uris: std::collections::HashSet<_> = self.uri_to_id.read().unwrap().keys().cloned().collect();
         
+        // Safeguard: If uri_to_id is empty, avoid compaction unless embeddings is also empty
+        // to prevent accidental deletion if mappings were lost.
+        if current_uris.is_empty() && !embeddings.is_empty() {
+            // We return 0 and skip compaction to be safe
+            return Ok(0);
+        }
+
         // Filter to only current URIs
         let active_entries: Vec<_> = embeddings.iter()
             .filter(|e| current_uris.contains(&e.uri))
@@ -286,10 +299,8 @@ impl VectorStore {
         let mut searcher = hnsw::Searcher::default();
 
         for entry in &active_entries {
-            if entry.embedding.len() == 384 {
-                let mut emb = [0.0f32; 384];
-                emb.copy_from_slice(&entry.embedding);
-                let id = new_index.insert(emb, &mut searcher);
+            if entry.embedding.len() == self.dimensions {
+                let id = new_index.insert(entry.embedding.clone(), &mut searcher);
                 new_id_to_uri.insert(id, entry.uri.clone());
                 new_uri_to_id.insert(entry.uri.clone(), id);
             }

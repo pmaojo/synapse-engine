@@ -603,19 +603,23 @@ impl McpStdioServer {
             Err(e) => return self.tool_result(id, &format!("Failed to read response: {}", e), true),
         };
 
-        // Simple HTML to text conversion (strip tags)
-        let text = html
-            .split('<')
-            .filter_map(|s| s.split('>').nth(1))
-            .collect::<Vec<_>>()
-            .join(" ")
+        // HTML to text conversion with Regex
+        let script_re = regex::Regex::new(r"(?s)<script.*?>.*?</script>").unwrap();
+        let style_re = regex::Regex::new(r"(?s)<style.*?>.*?</style>").unwrap();
+        let tag_re = regex::Regex::new(r"<[^>]*>").unwrap();
+
+        let no_script = script_re.replace_all(&html, " ");
+        let no_style = style_re.replace_all(&no_script, " ");
+        let text_content = tag_re.replace_all(&no_style, " ");
+
+        let text = text_content
             .split_whitespace()
             .collect::<Vec<_>>()
             .join(" ");
 
-        // Chunk text
+        // Chunk text with overlap
         let processor = crate::processor::TextProcessor::new();
-        let chunks = processor.chunk_text(&text, 1000);
+        let chunks = processor.chunk_text(&text, 1000, 150);
 
         // Add to vector store
         let store = match self.engine.get_store(namespace) {
@@ -656,9 +660,9 @@ impl McpStdioServer {
         };
         let namespace = args.get("namespace").and_then(|v| v.as_str()).unwrap_or("default");
 
-        // Chunk text
+        // Chunk text with overlap
         let processor = crate::processor::TextProcessor::new();
-        let chunks = processor.chunk_text(&content, 1000);
+        let chunks = processor.chunk_text(&content, 1000, 150);
 
         // Add to vector store
         let store = match self.engine.get_store(namespace) {

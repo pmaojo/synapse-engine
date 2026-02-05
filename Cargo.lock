@@ -2447,6 +2447,7 @@ dependencies = [
  "prost",
  "rand_pcg",
  "reasonable",
+ "regex",
  "reqwest",
  "serde",
  "serde_json",

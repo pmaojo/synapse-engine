@@ -119,14 +119,20 @@ impl SynapseStore {
             
             let quad = Quad::new(subject, predicate, object, GraphName::DefaultGraph);
             if self.store.insert(&quad)? {
-                added += 1;
-                
                 // Also index in vector store if available
                 if let Some(ref vs) = self.vector_store {
                     // Create searchable content from triple
                     let content = format!("{} {} {}", s, p, o);
-                    let _ = vs.add(&subject_uri, &content).await;
+                    if let Err(e) = vs.add(&subject_uri, &content).await {
+                        // Rollback graph insertion to ensure consistency
+                        self.store.remove(&quad)?;
+                        return Err(anyhow::anyhow!(
+                            "Vector store insertion failed, rolled back graph change: {}",
+                            e
+                        ));
+                    }
                 }
+                added += 1;
             }
         }
 
