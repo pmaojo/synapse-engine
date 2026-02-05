@@ -246,7 +246,7 @@ impl McpStdioServer {
                         },
                         "serverInfo": {
                         "name": "synapse",
-                        "version": "0.4.1"
+                        "version": "0.5.0"
                     }
                     })),
                     error: None,

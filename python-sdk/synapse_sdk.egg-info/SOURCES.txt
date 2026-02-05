@@ -1,3 +1,4 @@
+README.md
 pyproject.toml
 synapse/__init__.py
 synapse/application/slm_manager.py

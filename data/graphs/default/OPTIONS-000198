@@ -16,7 +16,7 @@
   avoid_flush_during_shutdown=false
   max_background_flushes=-1
   delayed_write_rate=16777216
-  max_open_files=976
+  max_open_files=524240
   max_subcompactions=1
   writable_file_max_buffer_size=1048576
   wal_bytes_per_sync=0
@@ -123,7 +123,7 @@
   target_file_size_base=67108864
   level0_file_num_compaction_trigger=2
   max_compaction_bytes=1677721600
-  disable_auto_compactions=true
+  disable_auto_compactions=false
   check_flush_compaction_key_order=true
   min_blob_size=0
   memtable_whole_key_filtering=false

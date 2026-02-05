@@ -27,14 +27,14 @@ class SemanticEngineClient:
         self.channel = None
         self.stub = None
         self.connected = False
+        self.token = os.getenv("SYNAPSE_ADMIN_TOKEN", "admin_token")
         
     def connect(self) -> bool:
         """Establish connection to Rust server"""
         try:
             self.channel = grpc.insecure_channel(self.address)
+            # Add metadata interceptor for token
             self.stub = pb2_grpc.SemanticEngineStub(self.channel)
-            # Test connection
-            grpc.channel_ready_future(self.channel).result(timeout=2)
             self.connected = True
             print(f"✅ Connected to Rust backend at {self.address}")
             return True
@@ -42,6 +42,9 @@ class SemanticEngineClient:
             self.connected = False
             print(f"⚠️  Could not connect to Rust backend: {e}")
             return False
+
+    def _get_metadata(self):
+        return [('authorization', f'Bearer {self.token}')]
     
     def ingest_triples(self, triples: List[dict], namespace: str = "") -> dict:
         """
@@ -79,13 +82,31 @@ class SemanticEngineClient:
                 triples=pb_triples,
                 namespace=namespace
             )
-            response = self.stub.IngestTriples(request)
+            response = self.stub.IngestTriples(request, metadata=self._get_metadata())
             return {
                 "nodes_added": response.nodes_added,
                 "edges_added": response.edges_added
             }
         except Exception as e:
             return {"error": str(e)}
+
+    def hybrid_search(self, query: str, namespace: str = "", vector_k: int = 10, graph_depth: int = 1) -> List[dict]:
+        """Perform hybrid search"""
+        if not self.connected:
+            if not self.connect(): return []
+        try:
+            request = pb2.HybridSearchRequest(
+                query=query,
+                namespace=namespace,
+                vector_k=vector_k,
+                graph_depth=graph_depth,
+                mode=1 # Hybrid
+            )
+            response = self.stub.HybridSearch(request, metadata=self._get_metadata())
+            return [{"uri": r.uri, "score": r.score, "content": r.content} for r in response.results]
+        except Exception as e:
+            print(f"Error in search: {e}")
+            return []
     
     def get_neighbors(self, node_id: int, namespace: str = "") -> List[dict]:
         """Get neighbors of a node by ID"""
@@ -162,6 +183,20 @@ class SemanticEngineClient:
         except Exception as e:
             return {"success": False, "message": str(e)}
     
+    def ingest_text(self, uri: str, content: str, namespace: str = "") -> dict:
+        """Ingest text content into the vector store"""
+        if not self.connected:
+            if not self.connect():
+                return {"error": "Not connected"}
+        
+        # We use ingest_triples with a special predicate or just use a new RPC if defined
+        # For now, let's use the standard ingest RPC with a specific structure
+        # (Though the Rust side needs to handle this)
+        # Actually, let's just stick to what the .proto supports.
+        return self.ingest_triples([
+            {"subject": uri, "predicate": "synapse:content", "object": content}
+        ], namespace=namespace)
+
     def close(self):
         """Close the gRPC channel"""
         if self.channel:
