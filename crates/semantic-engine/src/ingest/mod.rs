@@ -1,13 +1,13 @@
-use anyhow::{Result, Context};
-use std::path::Path;
-use std::fs;
 use crate::store::SynapseStore;
+use anyhow::{Context, Result};
+use std::fs;
+use std::path::Path;
 use std::sync::Arc;
 
-pub mod processor;
 pub mod extractor;
+pub mod processor;
 
-use extractor::{Extractor, CsvExtractor, MarkdownExtractor};
+use extractor::{CsvExtractor, Extractor, MarkdownExtractor};
 
 pub struct IngestionEngine {
     store: Arc<SynapseStore>,
@@ -19,12 +19,10 @@ impl IngestionEngine {
     }
 
     pub async fn ingest_file(&self, path: &Path, _namespace: &str) -> Result<u32> {
-        let content = fs::read_to_string(path)
-            .with_context(|| format!("Failed to read file: {:?}", path))?;
-        
-        let extension = path.extension()
-            .and_then(|s| s.to_str())
-            .unwrap_or("");
+        let content =
+            fs::read_to_string(path).with_context(|| format!("Failed to read file: {:?}", path))?;
+
+        let extension = path.extension().and_then(|s| s.to_str()).unwrap_or("");
 
         let result = match extension {
             "csv" => CsvExtractor::new().extract(&content)?,

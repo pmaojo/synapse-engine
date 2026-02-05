@@ -12,6 +12,12 @@ pub struct CsvExtractor {
     pub delimiter: u8,
 }
 
+impl Default for CsvExtractor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CsvExtractor {
     pub fn new() -> Self {
         Self { delimiter: b',' }
@@ -23,15 +29,17 @@ impl Extractor for CsvExtractor {
         let mut rdr = csv::ReaderBuilder::new()
             .delimiter(self.delimiter)
             .from_reader(content.as_bytes());
-        
+
         let headers = rdr.headers()?.clone();
         let mut triples = Vec::new();
-        
+
         for result in rdr.records() {
             let record = result?;
             if let Some(subject) = record.get(0) {
-                if subject.trim().is_empty() { continue; }
-                
+                if subject.trim().is_empty() {
+                    continue;
+                }
+
                 for (i, value) in record.iter().enumerate().skip(1) {
                     if let Some(predicate) = headers.get(i) {
                         let val_trimmed = value.trim();
@@ -39,14 +47,14 @@ impl Extractor for CsvExtractor {
                             triples.push((
                                 subject.to_string(),
                                 predicate.to_string(),
-                                val_trimmed.to_string()
+                                val_trimmed.to_string(),
                             ));
                         }
                     }
                 }
             }
         }
-        
+
         Ok(ExtractionResult { triples })
     }
 }
@@ -57,11 +65,13 @@ impl Extractor for MarkdownExtractor {
     fn extract(&self, content: &str) -> Result<ExtractionResult> {
         let mut triples = Vec::new();
         let mut current_header = String::new();
-        
+
         for line in content.lines() {
             let trimmed = line.trim();
-            if trimmed.is_empty() { continue; }
-            
+            if trimmed.is_empty() {
+                continue;
+            }
+
             if trimmed.starts_with("#") {
                 current_header = trimmed.trim_start_matches('#').trim().to_string();
             } else if trimmed.starts_with("- ") || trimmed.starts_with("* ") {
@@ -71,7 +81,7 @@ impl Extractor for MarkdownExtractor {
                         triples.push((
                             current_header.clone(),
                             "mentions".to_string(),
-                            item.to_string()
+                            item.to_string(),
                         ));
                     }
                 }
@@ -83,12 +93,12 @@ impl Extractor for MarkdownExtractor {
                     triples.push((
                         current_header.clone(),
                         predicate.to_string(),
-                        object.to_string()
+                        object.to_string(),
                     ));
                 }
             }
         }
-        
+
         Ok(ExtractionResult { triples })
     }
 }

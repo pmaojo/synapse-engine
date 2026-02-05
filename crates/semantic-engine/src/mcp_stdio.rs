@@ -1,11 +1,12 @@
-use crate::server::MySemanticEngine;
+use crate::mcp_types::{
+    CallToolResult, Content, ListToolsResult, McpError, McpRequest, McpResponse, Tool,
+};
 use crate::server::proto::semantic_engine_server::SemanticEngine;
 use crate::server::proto::{
-    IngestRequest, IngestFileRequest, Triple, Provenance, 
-    SparqlRequest, HybridSearchRequest, ReasoningRequest,
-    SearchMode, ReasoningStrategy,
+    HybridSearchRequest, IngestFileRequest, IngestRequest, Provenance, ReasoningRequest,
+    ReasoningStrategy, SearchMode, SparqlRequest, Triple,
 };
-use crate::mcp_types::{McpRequest, McpResponse, McpError, Tool, ListToolsResult, CallToolResult, Content};
+use crate::server::MySemanticEngine;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tonic::Request;
@@ -49,7 +50,9 @@ impl McpStdioServer {
         vec![
             Tool {
                 name: "ingest_triples".to_string(),
-                description: Some("Ingest one or more RDF triples into the knowledge graph".to_string()),
+                description: Some(
+                    "Ingest one or more RDF triples into the knowledge graph".to_string(),
+                ),
                 input_schema: serde_json::json!({
                     "type": "object",
                     "properties": {
@@ -72,7 +75,9 @@ impl McpStdioServer {
             },
             Tool {
                 name: "ingest_file".to_string(),
-                description: Some("Ingest a CSV or Markdown file into the knowledge graph".to_string()),
+                description: Some(
+                    "Ingest a CSV or Markdown file into the knowledge graph".to_string(),
+                ),
                 input_schema: serde_json::json!({
                     "type": "object",
                     "properties": {
@@ -111,7 +116,9 @@ impl McpStdioServer {
             },
             Tool {
                 name: "apply_reasoning".to_string(),
-                description: Some("Apply RDFS or OWL-RL reasoning to infer new triples".to_string()),
+                description: Some(
+                    "Apply RDFS or OWL-RL reasoning to infer new triples".to_string(),
+                ),
                 input_schema: serde_json::json!({
                     "type": "object",
                     "properties": {
@@ -123,7 +130,9 @@ impl McpStdioServer {
             },
             Tool {
                 name: "get_neighbors".to_string(),
-                description: Some("Get neighboring nodes connected to a given URI in the graph".to_string()),
+                description: Some(
+                    "Get neighboring nodes connected to a given URI in the graph".to_string(),
+                ),
                 input_schema: serde_json::json!({
                     "type": "object",
                     "properties": {
@@ -136,7 +145,10 @@ impl McpStdioServer {
             },
             Tool {
                 name: "list_triples".to_string(),
-                description: Some("List all triples in a namespace (useful for debugging/exploration)".to_string()),
+                description: Some(
+                    "List all triples in a namespace (useful for debugging/exploration)"
+                        .to_string(),
+                ),
                 input_schema: serde_json::json!({
                     "type": "object",
                     "properties": {
@@ -158,7 +170,10 @@ impl McpStdioServer {
             },
             Tool {
                 name: "ingest_url".to_string(),
-                description: Some("Scrape a web page and add its content to the vector store for RAG retrieval".to_string()),
+                description: Some(
+                    "Scrape a web page and add its content to the vector store for RAG retrieval"
+                        .to_string(),
+                ),
                 input_schema: serde_json::json!({
                     "type": "object",
                     "properties": {
@@ -170,7 +185,9 @@ impl McpStdioServer {
             },
             Tool {
                 name: "ingest_text".to_string(),
-                description: Some("Add arbitrary text content to the vector store for RAG retrieval".to_string()),
+                description: Some(
+                    "Add arbitrary text content to the vector store for RAG retrieval".to_string(),
+                ),
                 input_schema: serde_json::json!({
                     "type": "object",
                     "properties": {
@@ -245,7 +262,9 @@ impl McpStdioServer {
                 }
             }
             "tools/list" => {
-                let result = ListToolsResult { tools: Self::get_tools() };
+                let result = ListToolsResult {
+                    tools: Self::get_tools(),
+                };
                 McpResponse {
                     jsonrpc: "2.0".to_string(),
                     id: request.id,
@@ -253,9 +272,7 @@ impl McpStdioServer {
                     error: None,
                 }
             }
-            "tools/call" => {
-                self.handle_tool_call(request).await
-            }
+            "tools/call" => self.handle_tool_call(request).await,
             // Legacy methods for backwards compatibility
             "ingest" => self.handle_legacy_ingest(request).await,
             "ingest_file" => self.handle_legacy_ingest_file(request).await,
@@ -283,7 +300,8 @@ impl McpStdioServer {
             None => return self.error_response(request.id, -32602, "Missing tool name"),
         };
 
-        let arguments = params.get("arguments")
+        let arguments = params
+            .get("arguments")
             .and_then(|v| v.as_object())
             .cloned()
             .unwrap_or_default();
@@ -311,7 +329,10 @@ impl McpStdioServer {
         id: Option<serde_json::Value>,
         args: &serde_json::Map<String, serde_json::Value>,
     ) -> McpResponse {
-        let namespace = args.get("namespace").and_then(|v| v.as_str()).unwrap_or("default");
+        let namespace = args
+            .get("namespace")
+            .and_then(|v| v.as_str())
+            .unwrap_or("default");
         let triples_array = match args.get("triples").and_then(|v| v.as_array()) {
             Some(t) => t,
             None => return self.error_response(id, -32602, "Missing 'triples' array"),
@@ -346,7 +367,11 @@ impl McpStdioServer {
         match self.engine.ingest_triples(req).await {
             Ok(resp) => {
                 let inner = resp.into_inner();
-                self.tool_result(id, &format!("Ingested {} triples", inner.edges_added), false)
+                self.tool_result(
+                    id,
+                    &format!("Ingested {} triples", inner.edges_added),
+                    false,
+                )
             }
             Err(e) => self.tool_result(id, &e.to_string(), true),
         }
@@ -361,7 +386,10 @@ impl McpStdioServer {
             Some(p) => p,
             None => return self.error_response(id, -32602, "Missing 'path'"),
         };
-        let namespace = args.get("namespace").and_then(|v| v.as_str()).unwrap_or("default");
+        let namespace = args
+            .get("namespace")
+            .and_then(|v| v.as_str())
+            .unwrap_or("default");
 
         let req = Request::new(IngestFileRequest {
             file_path: path.to_string(),
@@ -371,7 +399,11 @@ impl McpStdioServer {
         match self.engine.ingest_file(req).await {
             Ok(resp) => {
                 let inner = resp.into_inner();
-                self.tool_result(id, &format!("Ingested {} triples from {}", inner.edges_added, path), false)
+                self.tool_result(
+                    id,
+                    &format!("Ingested {} triples from {}", inner.edges_added, path),
+                    false,
+                )
             }
             Err(e) => self.tool_result(id, &e.to_string(), true),
         }
@@ -386,7 +418,10 @@ impl McpStdioServer {
             Some(q) => q,
             None => return self.error_response(id, -32602, "Missing 'query'"),
         };
-        let namespace = args.get("namespace").and_then(|v| v.as_str()).unwrap_or("default");
+        let namespace = args
+            .get("namespace")
+            .and_then(|v| v.as_str())
+            .unwrap_or("default");
 
         let req = Request::new(SparqlRequest {
             query: query.to_string(),
@@ -394,9 +429,7 @@ impl McpStdioServer {
         });
 
         match self.engine.query_sparql(req).await {
-            Ok(resp) => {
-                self.tool_result(id, &resp.into_inner().results_json, false)
-            }
+            Ok(resp) => self.tool_result(id, &resp.into_inner().results_json, false),
             Err(e) => self.tool_result(id, &e.to_string(), true),
         }
     }
@@ -410,9 +443,15 @@ impl McpStdioServer {
             Some(q) => q,
             None => return self.error_response(id, -32602, "Missing 'query'"),
         };
-        let namespace = args.get("namespace").and_then(|v| v.as_str()).unwrap_or("default");
+        let namespace = args
+            .get("namespace")
+            .and_then(|v| v.as_str())
+            .unwrap_or("default");
         let vector_k = args.get("vector_k").and_then(|v| v.as_u64()).unwrap_or(10) as u32;
-        let graph_depth = args.get("graph_depth").and_then(|v| v.as_u64()).unwrap_or(1) as u32;
+        let graph_depth = args
+            .get("graph_depth")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(1) as u32;
         let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(20) as u32;
 
         let req = Request::new(HybridSearchRequest {
@@ -428,14 +467,17 @@ impl McpStdioServer {
             Ok(resp) => {
                 let results = resp.into_inner().results;
                 // Manually serialize since proto SearchResult doesn't derive Serialize
-                let json_results: Vec<serde_json::Value> = results.iter().map(|r| {
-                    serde_json::json!({
-                        "node_id": r.node_id,
-                        "score": r.score,
-                        "content": r.content,
-                        "uri": r.uri
+                let json_results: Vec<serde_json::Value> = results
+                    .iter()
+                    .map(|r| {
+                        serde_json::json!({
+                            "node_id": r.node_id,
+                            "score": r.score,
+                            "content": r.content,
+                            "uri": r.uri
+                        })
                     })
-                }).collect();
+                    .collect();
                 let json = serde_json::to_string_pretty(&json_results).unwrap_or_default();
                 self.tool_result(id, &json, false)
             }
@@ -448,9 +490,18 @@ impl McpStdioServer {
         id: Option<serde_json::Value>,
         args: &serde_json::Map<String, serde_json::Value>,
     ) -> McpResponse {
-        let namespace = args.get("namespace").and_then(|v| v.as_str()).unwrap_or("default");
-        let strategy_str = args.get("strategy").and_then(|v| v.as_str()).unwrap_or("rdfs");
-        let materialize = args.get("materialize").and_then(|v| v.as_bool()).unwrap_or(false);
+        let namespace = args
+            .get("namespace")
+            .and_then(|v| v.as_str())
+            .unwrap_or("default");
+        let strategy_str = args
+            .get("strategy")
+            .and_then(|v| v.as_str())
+            .unwrap_or("rdfs");
+        let materialize = args
+            .get("materialize")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
 
         let strategy = match strategy_str.to_lowercase().as_str() {
             "owlrl" | "owl-rl" => ReasoningStrategy::Owlrl as i32,
@@ -481,8 +532,14 @@ impl McpStdioServer {
             Some(u) => u,
             None => return self.error_response(id, -32602, "Missing 'uri'"),
         };
-        let namespace = args.get("namespace").and_then(|v| v.as_str()).unwrap_or("default");
-        let direction = args.get("direction").and_then(|v| v.as_str()).unwrap_or("outgoing");
+        let namespace = args
+            .get("namespace")
+            .and_then(|v| v.as_str())
+            .unwrap_or("default");
+        let direction = args
+            .get("direction")
+            .and_then(|v| v.as_str())
+            .unwrap_or("outgoing");
 
         let store = match self.engine.get_store(namespace) {
             Ok(s) => s,
@@ -494,14 +551,16 @@ impl McpStdioServer {
         // Query outgoing edges (URI as subject)
         if direction == "outgoing" || direction == "both" {
             if let Ok(subj) = oxigraph::model::NamedNodeRef::new(uri) {
-                for quad in store.store.quads_for_pattern(Some(subj.into()), None, None, None) {
-                    if let Ok(q) = quad {
-                        neighbors.push(serde_json::json!({
-                            "direction": "outgoing",
-                            "predicate": q.predicate.to_string(),
-                            "target": q.object.to_string()
-                        }));
-                    }
+                for q in store
+                    .store
+                    .quads_for_pattern(Some(subj.into()), None, None, None)
+                    .flatten()
+                {
+                    neighbors.push(serde_json::json!({
+                        "direction": "outgoing",
+                        "predicate": q.predicate.to_string(),
+                        "target": q.object.to_string()
+                    }));
                 }
             }
         }
@@ -509,14 +568,16 @@ impl McpStdioServer {
         // Query incoming edges (URI as object)
         if direction == "incoming" || direction == "both" {
             if let Ok(obj) = oxigraph::model::NamedNodeRef::new(uri) {
-                for quad in store.store.quads_for_pattern(None, None, Some(obj.into()), None) {
-                    if let Ok(q) = quad {
-                        neighbors.push(serde_json::json!({
-                            "direction": "incoming",
-                            "predicate": q.predicate.to_string(),
-                            "source": q.subject.to_string()
-                        }));
-                    }
+                for q in store
+                    .store
+                    .quads_for_pattern(None, None, Some(obj.into()), None)
+                    .flatten()
+                {
+                    neighbors.push(serde_json::json!({
+                        "direction": "incoming",
+                        "predicate": q.predicate.to_string(),
+                        "source": q.subject.to_string()
+                    }));
                 }
             }
         }
@@ -530,7 +591,10 @@ impl McpStdioServer {
         id: Option<serde_json::Value>,
         args: &serde_json::Map<String, serde_json::Value>,
     ) -> McpResponse {
-        let namespace = args.get("namespace").and_then(|v| v.as_str()).unwrap_or("default");
+        let namespace = args
+            .get("namespace")
+            .and_then(|v| v.as_str())
+            .unwrap_or("default");
         let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(100) as usize;
 
         let store = match self.engine.get_store(namespace) {
@@ -539,14 +603,12 @@ impl McpStdioServer {
         };
 
         let mut triples = Vec::new();
-        for quad in store.store.iter().take(limit) {
-            if let Ok(q) = quad {
-                triples.push(serde_json::json!({
-                    "subject": q.subject.to_string(),
-                    "predicate": q.predicate.to_string(),
-                    "object": q.object.to_string()
-                }));
-            }
+        for q in store.store.iter().take(limit).flatten() {
+            triples.push(serde_json::json!({
+                "subject": q.subject.to_string(),
+                "predicate": q.predicate.to_string(),
+                "object": q.object.to_string()
+            }));
         }
 
         let json = serde_json::to_string_pretty(&triples).unwrap_or_default();
@@ -585,7 +647,10 @@ impl McpStdioServer {
             Some(u) => u,
             None => return self.error_response(id, -32602, "Missing 'url'"),
         };
-        let namespace = args.get("namespace").and_then(|v| v.as_str()).unwrap_or("default");
+        let namespace = args
+            .get("namespace")
+            .and_then(|v| v.as_str())
+            .unwrap_or("default");
 
         // Fetch URL content
         let client = reqwest::Client::new();
@@ -600,18 +665,16 @@ impl McpStdioServer {
 
         let html = match response.text().await {
             Ok(t) => t,
-            Err(e) => return self.tool_result(id, &format!("Failed to read response: {}", e), true),
+            Err(e) => {
+                return self.tool_result(id, &format!("Failed to read response: {}", e), true)
+            }
         };
 
-        // Simple HTML to text conversion (strip tags)
-        let text = html
-            .split('<')
-            .filter_map(|s| s.split('>').nth(1))
-            .collect::<Vec<_>>()
-            .join(" ")
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" ");
+        // Robust HTML to text conversion
+        let text = match html2text::from_read(html.as_bytes(), 80) {
+            Ok(t) => t,
+            Err(e) => return self.tool_result(id, &format!("Failed to parse HTML: {}", e), true),
+        };
 
         // Chunk text
         let processor = crate::processor::TextProcessor::new();
@@ -634,12 +697,20 @@ impl McpStdioServer {
                     }
                 }
             }
-            self.tool_result(id, &format!("Ingested URL: {} ({} chars, {} chunks)", url, text.len(), added_chunks), false)
+            self.tool_result(
+                id,
+                &format!(
+                    "Ingested URL: {} ({} chars, {} chunks)",
+                    url,
+                    text.len(),
+                    added_chunks
+                ),
+                false,
+            )
         } else {
             self.tool_result(id, "Vector store not available", true)
         }
     }
-
 
     async fn call_ingest_text(
         &self,
@@ -654,11 +725,14 @@ impl McpStdioServer {
             Some(c) => c,
             None => return self.error_response(id, -32602, "Missing 'content'"),
         };
-        let namespace = args.get("namespace").and_then(|v| v.as_str()).unwrap_or("default");
+        let namespace = args
+            .get("namespace")
+            .and_then(|v| v.as_str())
+            .unwrap_or("default");
 
         // Chunk text
         let processor = crate::processor::TextProcessor::new();
-        let chunks = processor.chunk_text(&content, 1000);
+        let chunks = processor.chunk_text(content, 1000);
 
         // Add to vector store
         let store = match self.engine.get_store(namespace) {
@@ -669,7 +743,11 @@ impl McpStdioServer {
         if let Some(ref vector_store) = store.vector_store {
             let mut added_chunks = 0;
             for (i, chunk) in chunks.iter().enumerate() {
-                let chunk_uri = if chunks.len() > 1 { format!("{}#chunk-{}", uri, i) } else { uri.to_string() };
+                let chunk_uri = if chunks.len() > 1 {
+                    format!("{}#chunk-{}", uri, i)
+                } else {
+                    uri.to_string()
+                };
                 match vector_store.add(&chunk_uri, chunk).await {
                     Ok(_) => added_chunks += 1,
                     Err(e) => {
@@ -677,7 +755,16 @@ impl McpStdioServer {
                     }
                 }
             }
-            self.tool_result(id, &format!("Ingested text: {} ({} chars, {} chunks)", uri, content.len(), added_chunks), false)
+            self.tool_result(
+                id,
+                &format!(
+                    "Ingested text: {} ({} chars, {} chunks)",
+                    uri,
+                    content.len(),
+                    added_chunks
+                ),
+                false,
+            )
         } else {
             self.tool_result(id, "Vector store not available", true)
         }
@@ -688,7 +775,10 @@ impl McpStdioServer {
         id: Option<serde_json::Value>,
         args: &serde_json::Map<String, serde_json::Value>,
     ) -> McpResponse {
-        let namespace = args.get("namespace").and_then(|v| v.as_str()).unwrap_or("default");
+        let namespace = args
+            .get("namespace")
+            .and_then(|v| v.as_str())
+            .unwrap_or("default");
 
         let store = match self.engine.get_store(namespace) {
             Ok(s) => s,
@@ -697,7 +787,11 @@ impl McpStdioServer {
 
         if let Some(ref vector_store) = store.vector_store {
             match vector_store.compact() {
-                Ok(removed) => self.tool_result(id, &format!("Compaction complete: {} stale entries removed", removed), false),
+                Ok(removed) => self.tool_result(
+                    id,
+                    &format!("Compaction complete: {} stale entries removed", removed),
+                    false,
+                ),
                 Err(e) => self.tool_result(id, &format!("Compaction error: {}", e), true),
             }
         } else {
@@ -710,7 +804,10 @@ impl McpStdioServer {
         id: Option<serde_json::Value>,
         args: &serde_json::Map<String, serde_json::Value>,
     ) -> McpResponse {
-        let namespace = args.get("namespace").and_then(|v| v.as_str()).unwrap_or("default");
+        let namespace = args
+            .get("namespace")
+            .and_then(|v| v.as_str())
+            .unwrap_or("default");
 
         let store = match self.engine.get_store(namespace) {
             Ok(s) => s,
@@ -734,8 +831,14 @@ impl McpStdioServer {
         id: Option<serde_json::Value>,
         args: &serde_json::Map<String, serde_json::Value>,
     ) -> McpResponse {
-        let namespace = args.get("namespace").and_then(|v| v.as_str()).unwrap_or("default");
-        let threshold = args.get("threshold").and_then(|v| v.as_f64()).unwrap_or(0.8);
+        let namespace = args
+            .get("namespace")
+            .and_then(|v| v.as_str())
+            .unwrap_or("default");
+        let threshold = args
+            .get("threshold")
+            .and_then(|v| v.as_f64())
+            .unwrap_or(0.8);
 
         let store = match self.engine.get_store(namespace) {
             Ok(s) => s,
@@ -776,7 +879,10 @@ impl McpStdioServer {
             params.get("predicate").and_then(|v| v.as_str()),
             params.get("object").and_then(|v| v.as_str()),
         ) {
-            let namespace = params.get("namespace").and_then(|v| v.as_str()).unwrap_or("default");
+            let namespace = params
+                .get("namespace")
+                .and_then(|v| v.as_str())
+                .unwrap_or("default");
             let triple = Triple {
                 subject: sub.to_string(),
                 predicate: pred.to_string(),
@@ -811,11 +917,16 @@ impl McpStdioServer {
     async fn handle_legacy_ingest_file(&self, request: McpRequest) -> McpResponse {
         let params = match request.params {
             Some(p) => p,
-            None => return self.error_response(request.id, -32602, "Invalid params: 'path' required"),
+            None => {
+                return self.error_response(request.id, -32602, "Invalid params: 'path' required")
+            }
         };
 
         if let Some(path) = params.get("path").and_then(|v| v.as_str()) {
-            let namespace = params.get("namespace").and_then(|v| v.as_str()).unwrap_or("default");
+            let namespace = params
+                .get("namespace")
+                .and_then(|v| v.as_str())
+                .unwrap_or("default");
 
             let req = Request::new(IngestFileRequest {
                 file_path: path.to_string(),
@@ -828,10 +939,13 @@ impl McpStdioServer {
                     McpResponse {
                         jsonrpc: "2.0".to_string(),
                         id: request.id,
-                        result: Some(serde_json::to_value(format!(
-                            "Ingested {} triples from {}",
-                            inner.edges_added, path
-                        )).unwrap()),
+                        result: Some(
+                            serde_json::to_value(format!(
+                                "Ingested {} triples from {}",
+                                inner.edges_added, path
+                            ))
+                            .unwrap(),
+                        ),
                         error: None,
                     }
                 }
@@ -842,7 +956,12 @@ impl McpStdioServer {
         }
     }
 
-    fn error_response(&self, id: Option<serde_json::Value>, code: i32, message: &str) -> McpResponse {
+    fn error_response(
+        &self,
+        id: Option<serde_json::Value>,
+        code: i32,
+        message: &str,
+    ) -> McpResponse {
         McpResponse {
             jsonrpc: "2.0".to_string(),
             id,
@@ -855,7 +974,12 @@ impl McpStdioServer {
         }
     }
 
-    fn tool_result(&self, id: Option<serde_json::Value>, text: &str, is_error: bool) -> McpResponse {
+    fn tool_result(
+        &self,
+        id: Option<serde_json::Value>,
+        text: &str,
+        is_error: bool,
+    ) -> McpResponse {
         let result = CallToolResult {
             content: vec![Content {
                 content_type: "text".to_string(),
