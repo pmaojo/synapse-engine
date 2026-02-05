@@ -1,72 +1,84 @@
 # Synapse 🧠⛓️
 
-**Synapse** is a high-performance, neuro-symbolic knowledge graph system designed to serve as the long-term memory for agentic AI. 
+**Synapse** is a high-performance, neuro-symbolic knowledge graph system designed to serve as the long-term memory for agentic AI. It bridges the gap between **unstructured semantic search (Vector RAG)** and **formal logical reasoning (Knowledge Graphs)**.
 
-## 🚀 One-Click Install for OpenClaw
+## 🚀 Key Capabilities
 
-Just run:
+-   **Blazing Fast Core**: Powered by Rust and [Oxigraph](https://github.com/oxigraph/oxigraph) for low-latency graph operations.
+-   **Neuro-symbolic Search**: Hybrid retrieval combining vector similarity with graph traversal expansion.
+-   **Reasoning Engine**: Built-in OWL-RL and RDFS reasoning strategies to derive implicit knowledge.
+-   **Multi-Tenancy**: Native support for isolated namespaces (e.g., `work`, `personal`, `os`).
+-   **Native MCP**: Seamlessly integrates as a [Model Context Protocol](https://modelcontextprotocol.io) server.
+
+## 📦 Installation & Setup
+
+### One-Click for OpenClaw
 ```bash
 npx skills install pmaojo/synapse-engine
 ```
 
-OpenClaw will automatically detect Synapse as an MCP server.
+### Python SDK
+v0.4.0 introduces the official high-level SDK:
+```bash
+pip install ./python-sdk
+```
 
-## 🛠️ Configuration
+## 🛠️ Usage
 
-To use Synapse as your agent's memory, add this to your `openclaw.json`:
+### Python SDK (Recommended)
+Connect and ingest knowledge with just a few lines of code:
+
+```python
+from synapse import get_client
+
+# Connect to local engine
+client = get_client()
+
+# Ingest semantic triples
+client.ingest_triples([
+    {"subject": "Pelayo", "predicate": "expertIn", "object": "Neuro-symbolic AI"}
+], namespace="work")
+
+# Hybrid Search
+results = client.hybrid_search("What is Pelayo's expertise?", namespace="work")
+```
+
+### MCP Integration
+Add Synapse to your `openclaw.json` (or Cursor/Claude Desktop) to enable direct LLM access:
 
 ```json
-"memorySearch": {
-  "provider": "mcp",
-  "mcpServer": "synapse"
+"mcpServers": {
+  "synapse": {
+    "command": "synapse",
+    "args": ["--mcp"],
+    "env": { "GRAPH_STORAGE_PATH": "./data/graphs" }
+  }
 }
 ```
 
-## 🌐 Notion Sync: Automated Omnipresence
+## 🌐 Notion Sync: Automated Memory
 
-Synapse can automatically convert your Notion notes into structured knowledge.
+Synapse can automatically distill your Notion notes into formal knowledge using LLM-driven extraction.
 
-### 1. Setup Notion Integration
-Make sure your OpenClaw environment has the Notion skill configured with your `NOTION_API_KEY`.
-
-### 2. Enable Auto-Sync
-Add a sync job to your `openclaw.json` or use the built-in cron:
+1. Configure the `notion` skill in your environment.
+2. Add a sync job to your `openclaw.json`:
 ```bash
-openclaw cron add --name "Notion to Synapse" --every "1h" --message "Read my recent Notion pages and ingest them into Synapse namespace 'personal'"
+openclaw cron add --name "Notion Sync" --every "1h" --message "Sync recent Notion pages to Synapse namespace 'personal'"
 ```
-
-### 3. How it works
-Robin will:
-1. Fetch new content from your linked Notion databases.
-2. Extract semantic triples using LLM reasoning.
-3. Ingest them into the specified Synapse namespace.
-4. Your notes are now queryable via SPARQL or natural language!
 
 ## 🏗️ Technical Architecture
 
-### 1. Ontology Management
-Ontologies are defined in standard OWL format within the `ontology/` directory (e.g., `core.owl`). 
-*   **Classes**: Hierarchical definitions (e.g., `Process` subClassOf `Event`).
-*   **Properties**: Object and Datatype properties with defined `domain` and `range`.
-*   **Evolution**: Following the **Architect's Loop**, new classes and properties are proposed when data doesn't fit existing schemas.
+### 1. Ontology-Driven Validation
+Ontologies are defined in standard OWL format (`ontology/*.owl`). Synapse uses these schemas to validate incoming triples, ensuring semantic consistency (domain/range checks) and preventing logical contradictions.
 
-### 2. Triple Validation
-Ingested triples are validated against current ontologies:
-*   **Semantic Consistency**: Ensures that subjects and objects match property domain/range constraints.
-*   **Inference-based Validation**: Uses the reasoner to check if new facts contradict existing knowledge (e.g., disjoint class violations).
+### 2. The Synapse Reasoner
+The Rust core implements a multi-strategy reasoner:
+*   **RDFS**: Efficient class and property transitivity.
+*   **OWL-RL**: Advanced logic for `SymmetricProperty`, `TransitiveProperty`, and `inverseOf` relationships.
+*   **Materialization**: Inferred facts are persisted in the graph, making reasoning-based queries near-instantaneous.
 
-### 3. Reasoning Engine
-The **Synapse Reasoner** is implemented in Rust, providing:
-*   **RDFS Strategy**: Implements class and property transitivity.
-*   **OWL-RL Strategy**: Advanced rules including `SymmetricProperty`, `TransitiveProperty`, and `inverseOf` logic.
-*   **Materialization**: Derives implicit triples and stores them in the graph for fast retrieval.
-
-## 🏗️ Features
-
-- **Blazing Fast Core**: Rust-based graph engine (Oxigraph).
-- **Native MCP**: Plugs directly into OpenClaw/Cursor.
-- **Reasoning Engine**: Built-in OWL reasoning.
-- **Namespace Isolation**: Manage multiple knowledge bases (Work, Personal, Research).
+### 3. Robust Ingestion
+v0.4.0 includes a new **Rollback Mechanism**: if vector indexing fails during ingestion, graph changes are automatically reverted to maintain memory integrity.
 
 ---
-*Developed by the Synapse Team*
+*Developed by Pelayo Maojo & the Synapse Team*
