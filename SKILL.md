@@ -2,19 +2,27 @@
 
 Synapse es el motor semántico neuro-simbólico de Robin (OpenClaw). Proporciona memoria a largo plazo estructurada, razonamiento y búsqueda híbrida.
 
-## 🛠️ Herramientas (Scripts Python)
+## 🛠️ Herramientas
 
-Usa `exec` para invocar estos scripts. Todos requieren el entorno virtual si tienen dependencias externas, pero usan `grpcio` que instalamos en el venv.
+### 1. Python SDK (synapse-sdk)
+He empaquetado la lógica de integración como un SDK instalable. Puedes usarlo en cualquier script:
 
-Usa: `/home/robin/workspace/skills/synapse/.venv/bin/python3 <script> ...`
+```python
+from synapse import get_client
 
-### 1. Ingestión de Conocimiento
+client = get_client()
+client.ingest_triples([
+    {"subject": "Pelayo", "predicate": "is", "object": "Expert"}
+], namespace="work")
+```
+
+### 2. Ingestión de Conocimiento
 - **Notion Sync**: Trae notas recientes de Notion y las convierte en RDF.
   ```bash
   python3 scripts/ingest_notion.py
   ```
 
-### 2. Razonamiento (Reasoning)
+### 3. Razonamiento (Reasoning)
 Ejecuta el razonador OWL-RL para inferir nuevos hechos basados en ontologías.
 - **Script**: `scripts/reason.py`
 - **Uso**:
@@ -22,7 +30,7 @@ Ejecuta el razonador OWL-RL para inferir nuevos hechos basados en ontologías.
   python3 scripts/reason.py --namespace <ns> --strategy OWLRL
   ```
 
-### 3. Consultas (SPARQL)
+### 4. Consultas (SPARQL)
 Realiza consultas complejas al grafo.
 - **Script**: `scripts/sparql.py`
 - **Uso**:
