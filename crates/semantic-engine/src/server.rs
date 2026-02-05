@@ -52,17 +52,37 @@ impl SemanticEngine for MySemanticEngine {
         let namespace = if req.namespace.is_empty() { "default" } else { &req.namespace };
         let store = self.get_store(namespace)?;
 
+        // Log provenance for audit
+        let timestamp = chrono::Utc::now().to_rfc3339();
+        let triple_count = req.triples.len();
+        let mut sources: Vec<String> = Vec::new();
+
         let triples: Vec<(String, String, String)> = req
             .triples
             .into_iter()
-            .map(|t| (t.subject, t.predicate, t.object))
+            .map(|t| {
+                // Capture provenance sources for logging
+                if let Some(ref prov) = t.provenance {
+                    if !prov.source.is_empty() && !sources.contains(&prov.source) {
+                        sources.push(prov.source.clone());
+                    }
+                }
+                (t.subject, t.predicate, t.object)
+            })
             .collect();
 
         match store.ingest_triples(triples).await {
-            Ok((added, _)) => Ok(Response::new(IngestResponse {
-                nodes_added: added,
-                edges_added: added,
-            })),
+            Ok((added, _)) => {
+                // Log ingestion for audit trail
+                eprintln!(
+                    "INGEST [{timestamp}] namespace={namespace} triples={triple_count} added={added} sources={:?}",
+                    sources
+                );
+                Ok(Response::new(IngestResponse {
+                    nodes_added: added,
+                    edges_added: added,
+                }))
+            }
             Err(e) => Err(Status::internal(e.to_string())),
         }
     }
@@ -98,6 +118,7 @@ impl SemanticEngine for MySemanticEngine {
         let direction = if req.direction.is_empty() { "outgoing" } else { &req.direction };
         let edge_filter = if req.edge_filter.is_empty() { None } else { Some(req.edge_filter.as_str()) };
         let max_depth = if req.depth == 0 { 1 } else { req.depth as usize };
+        let limit_per_layer = if req.limit_per_layer == 0 { usize::MAX } else { req.limit_per_layer as usize };
 
         let mut neighbors = Vec::new();
         let mut visited = std::collections::HashSet::new();
@@ -110,10 +131,16 @@ impl SemanticEngine for MySemanticEngine {
         }
 
         // BFS traversal up to max_depth
-        for _depth in 0..max_depth {
+        for current_depth in 1..=max_depth {
             let mut next_frontier = Vec::new();
+            let mut layer_count = 0;
+            let score = 1.0 / current_depth as f32;  // Path scoring: closer = higher
 
             for uri in &current_frontier {
+                if layer_count >= limit_per_layer {
+                    break;
+                }
+
                 // Query outgoing edges (URI as subject)
                 if direction == "outgoing" || direction == "both" {
                     if let Ok(subj) = oxigraph::model::NamedNodeRef::new(uri) {
@@ -123,6 +150,9 @@ impl SemanticEngine for MySemanticEngine {
                             None,
                             None,
                         ) {
+                            if layer_count >= limit_per_layer {
+                                break;
+                            }
                             if let Ok(q) = quad {
                                 let pred = q.predicate.to_string();
                                 // Apply edge filter if specified
@@ -140,8 +170,11 @@ impl SemanticEngine for MySemanticEngine {
                                         edge_type: pred,
                                         uri: obj_uri.clone(),
                                         direction: "outgoing".to_string(),
+                                        depth: current_depth as u32,
+                                        score,
                                     });
                                     next_frontier.push(obj_uri);
+                                    layer_count += 1;
                                 }
                             }
                         }
@@ -157,6 +190,9 @@ impl SemanticEngine for MySemanticEngine {
                             Some(obj.into()),
                             None,
                         ) {
+                            if layer_count >= limit_per_layer {
+                                break;
+                            }
                             if let Ok(q) = quad {
                                 let pred = q.predicate.to_string();
                                 // Apply edge filter if specified
@@ -174,8 +210,11 @@ impl SemanticEngine for MySemanticEngine {
                                         edge_type: pred,
                                         uri: subj_uri.clone(),
                                         direction: "incoming".to_string(),
+                                        depth: current_depth as u32,
+                                        score,
                                     });
                                     next_frontier.push(subj_uri);
+                                    layer_count += 1;
                                 }
                             }
                         }
@@ -188,6 +227,9 @@ impl SemanticEngine for MySemanticEngine {
                 break;
             }
         }
+
+        // Sort by score (highest first)
+        neighbors.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
 
         Ok(Response::new(NeighborResponse { neighbors }))
     }
