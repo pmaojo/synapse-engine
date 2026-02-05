@@ -1,0 +1,185 @@
+"""
+Ingestion Service
+Unified entry point for all triple ingestion with validation, deduplication, 
+enrichment, and provenance tracking.
+"""
+import hashlib
+from typing import List, Tuple, Dict, Any, Optional
+from datetime import datetime
+from synapse.validation.ontology_validator import OntologyValidator
+from synapse.tools.owl_reasoner import OWLReasoningAgent
+
+class IngestionService:
+    def __init__(self, ontology_service, rust_client, owl_reasoner=None):
+        self.ontology = ontology_service
+        self.rust_client = rust_client
+        self.validator = OntologyValidator(ontology_service)
+        self.reasoner = owl_reasoner
+        self.seen_hashes = set()  # For deduplication
+        
+        print("📥 Ingestion Service initialized")
+    
+    def ingest(self, 
+               triples: List[Tuple[str, str, str]], 
+               source: str = "unknown",
+               metadata: Optional[Dict[str, Any]] = None,
+               skip_enrichment: bool = False,
+               namespace: str = "default") -> Dict[str, Any]:
+        """
+        Main ingestion entry point.
+        
+        Args:
+            triples: List of (subject, predicate, object) tuples
+            source: Origin identifier (e.g., "CSV:plants.csv:row_5", "UI:Tab1")
+            metadata: Additional context (timestamp, confidence, etc.)
+            skip_enrichment: If True, skip OWL reasoning step
+            namespace: Tenant ID for isolation
+            
+        Returns:
+            Dictionary with ingestion statistics
+        """
+        if not triples:
+            return {"status": "empty", "stored": 0}
+        
+        stats = {
+            "input": len(triples),
+            "validated": 0,
+            "duplicates": 0,
+            "enriched": 0,
+            "stored": 0,
+            "errors": []
+        }
+        
+        # 1. VALIDATION
+        validated_triples = self._validate(triples, stats)
+        
+        # 2. DEDUPLICATION
+        unique_triples = self._deduplicate(validated_triples, stats)
+        
+        # 3. SEMANTIC ENRICHMENT (Optional)
+        if not skip_enrichment and self.reasoner and unique_triples:
+            enriched_triples = self._enrich(unique_triples, stats)
+        else:
+            enriched_triples = unique_triples
+        
+        # 4. ADD PROVENANCE
+        triples_with_provenance = self._add_provenance(
+            enriched_triples, source, metadata
+        )
+        
+        # 5. BATCH STORE
+        if triples_with_provenance:
+            stored_count = self._batch_store(triples_with_provenance, namespace=namespace)
+            stats["stored"] = stored_count
+        
+        return stats
+    
+    def _validate(self, triples: List[Tuple], stats: Dict) -> List[Tuple]:
+        """Validate triples against ontology"""
+        validated = []
+        
+        for triple in triples:
+            try:
+                # Unpack triple for validator
+                s, p, o = triple
+                validation_result = self.validator.validate_triple(s, p, o)
+                
+                if validation_result.get("valid", False):
+                    validated.append(triple)
+                    stats["validated"] += 1
+                else:
+                    errors = validation_result.get("errors", ["Unknown validation error"])
+                    stats["errors"].append(f"Validation failed for {triple}: {', '.join(errors)}")
+            except Exception as e:
+                stats["errors"].append(f"Validation error for {triple}: {e}")
+        
+        return validated
+    
+    def _deduplicate(self, triples: List[Tuple], stats: Dict) -> List[Tuple]:
+        """Remove duplicate triples"""
+        unique = []
+        
+        for triple in triples:
+            # Create hash of triple
+            triple_hash = hashlib.md5(
+                f"{triple[0]}|{triple[1]}|{triple[2]}".encode()
+            ).hexdigest()
+            
+            if triple_hash not in self.seen_hashes:
+                self.seen_hashes.add(triple_hash)
+                unique.append(triple)
+            else:
+                stats["duplicates"] += 1
+        
+        return unique
+    
+    def _enrich(self, triples: List[Tuple], stats: Dict) -> List[Tuple]:
+        """Apply OWL reasoning to infer new triples"""
+        enriched = list(triples)  # Start with original
+        
+        try:
+            if not self.reasoner:
+                return enriched
+
+            # Use OWLReasoningAgent to infer new triples
+            inference_result = self.reasoner.infer(triples)
+
+            inferred_triples = inference_result.get("inferred_triples", [])
+            
+            if inferred_triples:
+                # Add unique inferred triples
+                added_count = 0
+                for triple in inferred_triples:
+                    # Check if triple exists in enriched list (comparing contents)
+                    if triple not in enriched:
+                        enriched.append(triple)
+                        added_count += 1
+
+                stats["enriched"] = added_count
+            
+        except Exception as e:
+            stats["errors"].append(f"Enrichment error: {e}")
+        
+        return enriched
+    
+    def _add_provenance(self, 
+                        triples: List[Tuple], 
+                        source: str,
+                        metadata: Optional[Dict] = None) -> List[Dict]:
+        """Add provenance metadata to each triple"""
+        timestamped = []
+        
+        for triple in triples:
+            triple_with_meta = {
+                "subject": triple[0],
+                "predicate": triple[1],
+                "object": triple[2],
+                "provenance": {
+                    "source": source,
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "method": metadata.get("method", "SLM") if metadata else "SLM"
+                }
+            }
+            
+            if metadata:
+                triple_with_meta["provenance"].update(metadata)
+            
+            timestamped.append(triple_with_meta)
+        
+        return timestamped
+    
+    def _batch_store(self, triples_with_meta: List[Dict], namespace: str = "default") -> int:
+        """Store triples in Rust backend efficiently"""
+        try:
+            if self.rust_client.connected:
+                # Pass full list of dictionaries with provenance
+                result = self.rust_client.ingest_triples(triples_with_meta, namespace=namespace)
+                return len(triples_with_meta) # Or check result['edges_added']
+            return 0
+        except Exception as e:
+            print(f"❌ Batch storage error: {e}")
+            return 0
+    
+    def clear_dedup_cache(self):
+        """Clear deduplication cache (useful for testing)"""
+        self.seen_hashes.clear()
