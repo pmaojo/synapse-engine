@@ -18,6 +18,27 @@ use std::path::Path;
 use crate::audit::InferenceAudit;
 use crate::auth::NamespaceAuth;
 
+#[derive(Clone)]
+pub struct AuthToken(pub String);
+
+pub fn auth_interceptor(mut req: Request<()>) -> Result<Request<()>, Status> {
+    if let Some(token) = req.metadata().get("authorization")
+        .and_then(|t| t.to_str().ok())
+        .map(|s| s.trim_start_matches("Bearer ").to_string()) {
+            req.extensions_mut().insert(AuthToken(token));
+    }
+    Ok(req)
+}
+
+fn get_token<T>(req: &Request<T>) -> Option<String> {
+    if let Some(token) = req.extensions().get::<AuthToken>() {
+        return Some(token.0.clone());
+    }
+    req.metadata().get("authorization")
+       .and_then(|t| t.to_str().ok())
+       .map(|s| s.trim_start_matches("Bearer ").to_string())
+}
+
 pub struct MySemanticEngine {
     pub storage_path: String,
     pub stores: DashMap<String, Arc<SynapseStore>>,
@@ -63,11 +84,7 @@ impl SemanticEngine for MySemanticEngine {
         request: Request<IngestRequest>,
     ) -> Result<Response<IngestResponse>, Status> {
         // Auth check (Write permission)
-        let token = request
-            .metadata()
-            .get("authorization")
-            .and_then(|t| t.to_str().ok())
-            .map(|s| s.trim_start_matches("Bearer ").to_string());
+        let token = get_token(&request);
         let req = request.into_inner();
         let namespace = if req.namespace.is_empty() {
             "default"
@@ -120,12 +137,16 @@ impl SemanticEngine for MySemanticEngine {
         &self,
         request: Request<IngestFileRequest>,
     ) -> Result<Response<IngestResponse>, Status> {
+        // Auth check (Write permission) - previously missing? or just implicit?
+        // Note: The original code didn't check auth for ingest_file!
+        // Adding it now for consistency as we are touching auth.
+        let token = get_token(&request);
         let req = request.into_inner();
-        let namespace = if req.namespace.is_empty() {
-            "default"
-        } else {
-            &req.namespace
-        };
+        let namespace = if req.namespace.is_empty() { "default" } else { &req.namespace };
+
+        if let Err(e) = self.auth.check(token.as_deref(), namespace, "write") {
+             return Err(Status::permission_denied(e));
+        }
         let store = self.get_store(namespace)?;
 
         let engine = IngestionEngine::new(store);
@@ -467,11 +488,7 @@ impl SemanticEngine for MySemanticEngine {
         request: Request<ReasoningRequest>,
     ) -> Result<Response<ReasoningResponse>, Status> {
         // Auth check (Reason permission)
-        let token = request
-            .metadata()
-            .get("authorization")
-            .and_then(|t| t.to_str().ok())
-            .map(|s| s.trim_start_matches("Bearer ").to_string());
+        let token = get_token(&request);
         let req = request.into_inner();
         let namespace = if req.namespace.is_empty() {
             "default"
