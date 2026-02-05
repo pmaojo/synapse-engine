@@ -10,3 +10,4 @@ pub mod ingest;
 pub mod auth;
 pub mod audit;
 pub mod disambiguation;
+pub mod processor;

@@ -15,16 +15,26 @@ use crate::server::proto::{ReasoningStrategy, SearchMode};
 use crate::ingest::IngestionEngine;
 use std::path::Path;
 
+use crate::auth::NamespaceAuth;
+use crate::audit::InferenceAudit;
+
 pub struct MySemanticEngine {
     pub storage_path: String,
     pub stores: DashMap<String, Arc<SynapseStore>>,
+    pub auth: Arc<NamespaceAuth>,
+    pub audit: Arc<InferenceAudit>,
 }
 
 impl MySemanticEngine {
     pub fn new(storage_path: &str) -> Self {
+        let auth = Arc::new(NamespaceAuth::new());
+        auth.load_from_env();
+        
         Self {
             storage_path: storage_path.to_string(),
             stores: DashMap::new(),
+            auth,
+            audit: Arc::new(InferenceAudit::new()),
         }
     }
 
@@ -48,8 +58,15 @@ impl SemanticEngine for MySemanticEngine {
         &self,
         request: Request<IngestRequest>,
     ) -> Result<Response<IngestResponse>, Status> {
+        // Auth check (Write permission)
+        let token = request.metadata().get("authorization").and_then(|t| t.to_str().ok()).map(|s| s.trim_start_matches("Bearer ").to_string());
         let req = request.into_inner();
         let namespace = if req.namespace.is_empty() { "default" } else { &req.namespace };
+        
+        if let Err(e) = self.auth.check(token.as_deref(), namespace, "write") {
+             return Err(Status::permission_denied(e));
+        }
+        
         let store = self.get_store(namespace)?;
 
         // Log provenance for audit
@@ -383,8 +400,15 @@ impl SemanticEngine for MySemanticEngine {
         &self,
         request: Request<ReasoningRequest>,
     ) -> Result<Response<ReasoningResponse>, Status> {
+        // Auth check (Reason permission)
+        let token = request.metadata().get("authorization").and_then(|t| t.to_str().ok()).map(|s| s.trim_start_matches("Bearer ").to_string());
         let req = request.into_inner();
         let namespace = if req.namespace.is_empty() { "default" } else { &req.namespace };
+        
+        if let Err(e) = self.auth.check(token.as_deref(), namespace, "reason") {
+             return Err(Status::permission_denied(e));
+        }
+
         let store = self.get_store(namespace)?;
         
         let strategy = match ReasoningStrategy::try_from(req.strategy) {
@@ -392,28 +416,49 @@ impl SemanticEngine for MySemanticEngine {
             Ok(ReasoningStrategy::Owlrl) => InternalStrategy::OWLRL,
             _ => InternalStrategy::None,
         };
+        let strategy_name = format!("{:?}", strategy);
 
         let reasoner = SynapseReasoner::new(strategy);
+        let start_triples = store.store.len().unwrap_or(0);
         
-        if req.materialize {
+        let response = if req.materialize {
             match reasoner.materialize(&store.store) {
-                Ok(count) => Ok(Response::new(ReasoningResponse {
-                    success: true,
-                    triples_inferred: count as u32,
-                    message: format!("Materialized {} triples in namespace '{}'", count, namespace),
-                })),
+                Ok(count) => {
+                    Ok(Response::new(ReasoningResponse {
+                        success: true,
+                        triples_inferred: count as u32,
+                        message: format!("Materialized {} triples in namespace '{}'", count, namespace),
+                    }))
+                },
                 Err(e) => Err(Status::internal(e.to_string())),
             }
         } else {
             match reasoner.apply(&store.store) {
-                Ok(triples) => Ok(Response::new(ReasoningResponse {
-                    success: true,
-                    triples_inferred: triples.len() as u32,
-                    message: format!("Found {} inferred triples in namespace '{}'", triples.len(), namespace),
-                })),
+                Ok(triples) => {
+                    Ok(Response::new(ReasoningResponse {
+                        success: true,
+                        triples_inferred: triples.len() as u32,
+                        message: format!("Found {} inferred triples in namespace '{}'", triples.len(), namespace),
+                    }))
+                },
                 Err(e) => Err(Status::internal(e.to_string())),
             }
+        };
+
+        // Audit Log
+        if let Ok(ref res) = response {
+            let inferred = res.get_ref().triples_inferred as usize;
+            self.audit.log(
+                namespace,
+                &strategy_name,
+                start_triples,
+                inferred,
+                0, // Duplicates skipped not easily tracked here without changing reasoner return signature
+                vec![] // Sample inferences
+            );
         }
+
+        response
     }
 }
 
