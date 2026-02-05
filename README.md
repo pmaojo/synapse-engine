@@ -43,18 +43,27 @@ client.ingest_triples([
 results = client.hybrid_search("What is Pelayo's expertise?", namespace="work")
 ```
 
-### MCP Integration
-Add Synapse to your `openclaw.json` (or Cursor/Claude Desktop) to enable direct LLM access:
+### MCP Integration (v0.4.0)
+Add Synapse to your `openclaw.json` (or Cursor/Claude Desktop) to enable direct LLM access to your knowledge graph:
 
 ```json
 "mcpServers": {
   "synapse": {
-    "command": "synapse",
+    "command": "path/to/synapse",
     "args": ["--mcp"],
-    "env": { "GRAPH_STORAGE_PATH": "./data/graphs" }
+    "env": { 
+      "GRAPH_STORAGE_PATH": "./data/graphs" 
+    }
   }
 }
 ```
+
+#### Available Tools:
+- `ingest_triples`: Direct RDF ingestion.
+- `sparql_query`: Complex graph querying.
+- `hybrid_search`: Semantic + structural retrieval.
+- `apply_reasoning`: Trigger OWL-RL/RDFS inference.
+- `ingest_url`: Automated scraping and embedding.
 
 ## 🌐 Notion Sync: Automated Memory
 
