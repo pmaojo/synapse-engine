@@ -38,7 +38,15 @@ impl InferenceAudit {
     }
 
     /// Log an inference operation
-    pub fn log(&self, namespace: &str, strategy: &str, input: usize, inferred: usize, skipped: usize, samples: Vec<(String, String, String)>) {
+    pub fn log(
+        &self,
+        namespace: &str,
+        strategy: &str,
+        input: usize,
+        inferred: usize,
+        skipped: usize,
+        samples: Vec<(String, String, String)>,
+    ) {
         let record = InferenceRecord {
             timestamp: Utc::now(),
             namespace: namespace.to_string(),
@@ -50,10 +58,10 @@ impl InferenceAudit {
         };
 
         let mut records = self.records.write().unwrap();
-        let ns_records = records.entry(namespace.to_string()).or_insert_with(Vec::new);
-        
+        let ns_records = records.entry(namespace.to_string()).or_default();
+
         ns_records.push(record);
-        
+
         // Trim to max records
         if ns_records.len() > self.max_records {
             ns_records.remove(0);

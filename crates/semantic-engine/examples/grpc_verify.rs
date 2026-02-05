@@ -1,6 +1,7 @@
 use synapse_core::server::proto::semantic_engine_client::SemanticEngineClient;
 use synapse_core::server::proto::{
-    IngestRequest, Triple, Provenance, HybridSearchRequest, SearchMode, ReasoningRequest, ReasoningStrategy
+    HybridSearchRequest, IngestRequest, Provenance, ReasoningRequest, ReasoningStrategy,
+    SearchMode, Triple,
 };
 use tonic::transport::Channel;
 
@@ -23,7 +24,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }),
         embedding: vec![],
     };
-    
+
     let triple2 = Triple {
         subject: "http://example.org/Human".to_string(),
         predicate: "http://www.w3.org/2000/01/rdf-schema#subClassOf".to_string(),
@@ -37,35 +38,44 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
 
     println!("Sending IngestRequest...");
-    let response = client.ingest_triples(IngestRequest {
-        triples: vec![triple, triple2],
-        namespace: "test_verification".to_string(),
-    }).await?;
+    let response = client
+        .ingest_triples(IngestRequest {
+            triples: vec![triple, triple2],
+            namespace: "test_verification".to_string(),
+        })
+        .await?;
     println!("Response: {:?}", response.into_inner());
 
     // 2. Apply Reasoning (RDFS Transitivity)
     println!("\nApplying RDFS Reasoning (Internal)...");
-    let reasoning_response = client.apply_reasoning(ReasoningRequest {
-        namespace: "test_verification".to_string(),
-        strategy: ReasoningStrategy::Rdfs as i32,
-        materialize: false,
-    }).await?;
+    let reasoning_response = client
+        .apply_reasoning(ReasoningRequest {
+            namespace: "test_verification".to_string(),
+            strategy: ReasoningStrategy::Rdfs as i32,
+            materialize: false,
+        })
+        .await?;
     println!("Reasoning Result: {:?}", reasoning_response.into_inner());
 
     // 3. Hybrid Search
     println!("\nPerforming Hybrid Search for 'Socrates'...");
-    let search_response = client.hybrid_search(HybridSearchRequest {
-        query: "Socrates".to_string(),
-        namespace: "test_verification".to_string(),
-        vector_k: 5,
-        graph_depth: 1,
-        mode: SearchMode::Hybrid as i32,
-        limit: 10,
-    }).await?;
-    
+    let search_response = client
+        .hybrid_search(HybridSearchRequest {
+            query: "Socrates".to_string(),
+            namespace: "test_verification".to_string(),
+            vector_k: 5,
+            graph_depth: 1,
+            mode: SearchMode::Hybrid as i32,
+            limit: 10,
+        })
+        .await?;
+
     println!("Search Results:");
     for result in search_response.into_inner().results {
-        println!(" - [Score: {:.4}] {} ({})", result.score, result.content, result.uri);
+        println!(
+            " - [Score: {:.4}] {} ({})",
+            result.score, result.content, result.uri
+        );
     }
 
     Ok(())

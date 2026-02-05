@@ -1,6 +1,6 @@
+use dashmap::DashMap;
 use std::sync::Arc;
 use tonic::{Request, Response, Status};
-use dashmap::DashMap;
 
 pub mod proto {
     tonic::include_proto!("semantic_engine");
@@ -9,14 +9,14 @@ pub mod proto {
 use proto::semantic_engine_server::SemanticEngine;
 use proto::*;
 
-use crate::store::SynapseStore;
-use crate::reasoner::{SynapseReasoner, ReasoningStrategy as InternalStrategy};
-use crate::server::proto::{ReasoningStrategy, SearchMode};
 use crate::ingest::IngestionEngine;
+use crate::reasoner::{ReasoningStrategy as InternalStrategy, SynapseReasoner};
+use crate::server::proto::{ReasoningStrategy, SearchMode};
+use crate::store::SynapseStore;
 use std::path::Path;
 
-use crate::auth::NamespaceAuth;
 use crate::audit::InferenceAudit;
+use crate::auth::NamespaceAuth;
 
 pub struct MySemanticEngine {
     pub storage_path: String,
@@ -29,7 +29,7 @@ impl MySemanticEngine {
     pub fn new(storage_path: &str) -> Self {
         let auth = Arc::new(NamespaceAuth::new());
         auth.load_from_env();
-        
+
         Self {
             storage_path: storage_path.to_string(),
             stores: DashMap::new(),
@@ -43,9 +43,13 @@ impl MySemanticEngine {
             return Ok(store.clone());
         }
 
-        let store = SynapseStore::open(namespace, &self.storage_path)
-            .map_err(|e| Status::internal(format!("Failed to open store for namespace '{}': {}", namespace, e)))?;
-        
+        let store = SynapseStore::open(namespace, &self.storage_path).map_err(|e| {
+            Status::internal(format!(
+                "Failed to open store for namespace '{}': {}",
+                namespace, e
+            ))
+        })?;
+
         let store_arc = Arc::new(store);
         self.stores.insert(namespace.to_string(), store_arc.clone());
         Ok(store_arc)
@@ -59,14 +63,22 @@ impl SemanticEngine for MySemanticEngine {
         request: Request<IngestRequest>,
     ) -> Result<Response<IngestResponse>, Status> {
         // Auth check (Write permission)
-        let token = request.metadata().get("authorization").and_then(|t| t.to_str().ok()).map(|s| s.trim_start_matches("Bearer ").to_string());
+        let token = request
+            .metadata()
+            .get("authorization")
+            .and_then(|t| t.to_str().ok())
+            .map(|s| s.trim_start_matches("Bearer ").to_string());
         let req = request.into_inner();
-        let namespace = if req.namespace.is_empty() { "default" } else { &req.namespace };
-        
+        let namespace = if req.namespace.is_empty() {
+            "default"
+        } else {
+            &req.namespace
+        };
+
         if let Err(e) = self.auth.check(token.as_deref(), namespace, "write") {
-             return Err(Status::permission_denied(e));
+            return Err(Status::permission_denied(e));
         }
-        
+
         let store = self.get_store(namespace)?;
 
         // Log provenance for audit
@@ -109,9 +121,13 @@ impl SemanticEngine for MySemanticEngine {
         request: Request<IngestFileRequest>,
     ) -> Result<Response<IngestResponse>, Status> {
         let req = request.into_inner();
-        let namespace = if req.namespace.is_empty() { "default" } else { &req.namespace };
+        let namespace = if req.namespace.is_empty() {
+            "default"
+        } else {
+            &req.namespace
+        };
         let store = self.get_store(namespace)?;
-        
+
         let engine = IngestionEngine::new(store);
         let path = Path::new(&req.file_path);
 
@@ -129,13 +145,33 @@ impl SemanticEngine for MySemanticEngine {
         request: Request<NodeRequest>,
     ) -> Result<Response<NeighborResponse>, Status> {
         let req = request.into_inner();
-        let namespace = if req.namespace.is_empty() { "default" } else { &req.namespace };
+        let namespace = if req.namespace.is_empty() {
+            "default"
+        } else {
+            &req.namespace
+        };
         let store = self.get_store(namespace)?;
-        
-        let direction = if req.direction.is_empty() { "outgoing" } else { &req.direction };
-        let edge_filter = if req.edge_filter.is_empty() { None } else { Some(req.edge_filter.as_str()) };
-        let max_depth = if req.depth == 0 { 1 } else { req.depth as usize };
-        let limit_per_layer = if req.limit_per_layer == 0 { usize::MAX } else { req.limit_per_layer as usize };
+
+        let direction = if req.direction.is_empty() {
+            "outgoing"
+        } else {
+            &req.direction
+        };
+        let edge_filter = if req.edge_filter.is_empty() {
+            None
+        } else {
+            Some(req.edge_filter.as_str())
+        };
+        let max_depth = if req.depth == 0 {
+            1
+        } else {
+            req.depth as usize
+        };
+        let limit_per_layer = if req.limit_per_layer == 0 {
+            usize::MAX
+        } else {
+            req.limit_per_layer as usize
+        };
 
         let mut neighbors = Vec::new();
         let mut visited = std::collections::HashSet::new();
@@ -151,7 +187,7 @@ impl SemanticEngine for MySemanticEngine {
         for current_depth in 1..=max_depth {
             let mut next_frontier = Vec::new();
             let mut layer_count = 0;
-            let score = 1.0 / current_depth as f32;  // Path scoring: closer = higher
+            let score = 1.0 / current_depth as f32; // Path scoring: closer = higher
 
             for uri in &current_frontier {
                 if layer_count >= limit_per_layer {
@@ -161,12 +197,11 @@ impl SemanticEngine for MySemanticEngine {
                 // Query outgoing edges (URI as subject)
                 if direction == "outgoing" || direction == "both" {
                     if let Ok(subj) = oxigraph::model::NamedNodeRef::new(uri) {
-                        for quad in store.store.quads_for_pattern(
-                            Some(subj.into()),
-                            None,
-                            None,
-                            None,
-                        ) {
+                        for quad in
+                            store
+                                .store
+                                .quads_for_pattern(Some(subj.into()), None, None, None)
+                        {
                             if layer_count >= limit_per_layer {
                                 break;
                             }
@@ -201,12 +236,11 @@ impl SemanticEngine for MySemanticEngine {
                 // Query incoming edges (URI as object)
                 if direction == "incoming" || direction == "both" {
                     if let Ok(obj) = oxigraph::model::NamedNodeRef::new(uri) {
-                        for quad in store.store.quads_for_pattern(
-                            None,
-                            None,
-                            Some(obj.into()),
-                            None,
-                        ) {
+                        for quad in
+                            store
+                                .store
+                                .quads_for_pattern(None, None, Some(obj.into()), None)
+                        {
                             if layer_count >= limit_per_layer {
                                 break;
                             }
@@ -246,7 +280,11 @@ impl SemanticEngine for MySemanticEngine {
         }
 
         // Sort by score (highest first)
-        neighbors.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        neighbors.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
 
         Ok(Response::new(NeighborResponse { neighbors }))
     }
@@ -256,7 +294,11 @@ impl SemanticEngine for MySemanticEngine {
         request: Request<SearchRequest>,
     ) -> Result<Response<SearchResponse>, Status> {
         let req = request.into_inner();
-        let namespace = if req.namespace.is_empty() { "default" } else { &req.namespace };
+        let namespace = if req.namespace.is_empty() {
+            "default"
+        } else {
+            &req.namespace
+        };
         let store = self.get_store(namespace)?;
 
         match store.hybrid_search(&req.query, req.limit as usize, 0).await {
@@ -271,7 +313,9 @@ impl SemanticEngine for MySemanticEngine {
                         uri,
                     })
                     .collect();
-                Ok(Response::new(SearchResponse { results: grpc_results }))
+                Ok(Response::new(SearchResponse {
+                    results: grpc_results,
+                }))
             }
             Err(e) => Err(Status::internal(e.to_string())),
         }
@@ -282,7 +326,11 @@ impl SemanticEngine for MySemanticEngine {
         request: Request<ResolveRequest>,
     ) -> Result<Response<ResolveResponse>, Status> {
         let req = request.into_inner();
-        let namespace = if req.namespace.is_empty() { "default" } else { &req.namespace };
+        let namespace = if req.namespace.is_empty() {
+            "default"
+        } else {
+            &req.namespace
+        };
         let store = self.get_store(namespace)?;
 
         // Look up the URI in our mapping
@@ -305,9 +353,13 @@ impl SemanticEngine for MySemanticEngine {
         request: Request<EmptyRequest>,
     ) -> Result<Response<TriplesResponse>, Status> {
         let req = request.into_inner();
-        let namespace = if req.namespace.is_empty() { "default" } else { &req.namespace };
+        let namespace = if req.namespace.is_empty() {
+            "default"
+        } else {
+            &req.namespace
+        };
         let store = self.get_store(namespace)?;
-        
+
         let mut triples = Vec::new();
 
         for quad in store.store.iter().map(|q| q.unwrap()) {
@@ -332,9 +384,13 @@ impl SemanticEngine for MySemanticEngine {
         request: Request<SparqlRequest>,
     ) -> Result<Response<SparqlResponse>, Status> {
         let req = request.into_inner();
-        let namespace = if req.namespace.is_empty() { "default" } else { &req.namespace };
+        let namespace = if req.namespace.is_empty() {
+            "default"
+        } else {
+            &req.namespace
+        };
         let store = self.get_store(namespace)?;
-        
+
         match store.query_sparql(&req.query) {
             Ok(json) => Ok(Response::new(SparqlResponse { results_json: json })),
             Err(e) => Err(Status::internal(e.to_string())),
@@ -346,11 +402,15 @@ impl SemanticEngine for MySemanticEngine {
         request: Request<EmptyRequest>,
     ) -> Result<Response<DeleteResponse>, Status> {
         let req = request.into_inner();
-        let namespace = if req.namespace.is_empty() { "default" } else { &req.namespace };
-        
+        let namespace = if req.namespace.is_empty() {
+            "default"
+        } else {
+            &req.namespace
+        };
+
         // Remove from cache
         self.stores.remove(namespace);
-        
+
         // Delete directory
         let path = Path::new(&self.storage_path).join(namespace);
         if path.exists() {
@@ -368,17 +428,21 @@ impl SemanticEngine for MySemanticEngine {
         request: Request<HybridSearchRequest>,
     ) -> Result<Response<SearchResponse>, Status> {
         let req = request.into_inner();
-        let namespace = if req.namespace.is_empty() { "default" } else { &req.namespace };
+        let namespace = if req.namespace.is_empty() {
+            "default"
+        } else {
+            &req.namespace
+        };
         let store = self.get_store(namespace)?;
 
         let vector_k = req.vector_k as usize;
         let graph_depth = req.graph_depth;
 
         let results = match SearchMode::try_from(req.mode) {
-            Ok(SearchMode::VectorOnly) | Ok(SearchMode::Hybrid) => {
-                store.hybrid_search(&req.query, vector_k, graph_depth).await
-                    .map_err(|e| Status::internal(format!("Hybrid search failed: {}", e)))?
-            }
+            Ok(SearchMode::VectorOnly) | Ok(SearchMode::Hybrid) => store
+                .hybrid_search(&req.query, vector_k, graph_depth)
+                .await
+                .map_err(|e| Status::internal(format!("Hybrid search failed: {}", e)))?,
             _ => vec![],
         };
 
@@ -393,7 +457,9 @@ impl SemanticEngine for MySemanticEngine {
             })
             .collect();
 
-        Ok(Response::new(SearchResponse { results: grpc_results }))
+        Ok(Response::new(SearchResponse {
+            results: grpc_results,
+        }))
     }
 
     async fn apply_reasoning(
@@ -401,16 +467,24 @@ impl SemanticEngine for MySemanticEngine {
         request: Request<ReasoningRequest>,
     ) -> Result<Response<ReasoningResponse>, Status> {
         // Auth check (Reason permission)
-        let token = request.metadata().get("authorization").and_then(|t| t.to_str().ok()).map(|s| s.trim_start_matches("Bearer ").to_string());
+        let token = request
+            .metadata()
+            .get("authorization")
+            .and_then(|t| t.to_str().ok())
+            .map(|s| s.trim_start_matches("Bearer ").to_string());
         let req = request.into_inner();
-        let namespace = if req.namespace.is_empty() { "default" } else { &req.namespace };
-        
+        let namespace = if req.namespace.is_empty() {
+            "default"
+        } else {
+            &req.namespace
+        };
+
         if let Err(e) = self.auth.check(token.as_deref(), namespace, "reason") {
-             return Err(Status::permission_denied(e));
+            return Err(Status::permission_denied(e));
         }
 
         let store = self.get_store(namespace)?;
-        
+
         let strategy = match ReasoningStrategy::try_from(req.strategy) {
             Ok(ReasoningStrategy::Rdfs) => InternalStrategy::RDFS,
             Ok(ReasoningStrategy::Owlrl) => InternalStrategy::OWLRL,
@@ -420,27 +494,30 @@ impl SemanticEngine for MySemanticEngine {
 
         let reasoner = SynapseReasoner::new(strategy);
         let start_triples = store.store.len().unwrap_or(0);
-        
+
         let response = if req.materialize {
             match reasoner.materialize(&store.store) {
-                Ok(count) => {
-                    Ok(Response::new(ReasoningResponse {
-                        success: true,
-                        triples_inferred: count as u32,
-                        message: format!("Materialized {} triples in namespace '{}'", count, namespace),
-                    }))
-                },
+                Ok(count) => Ok(Response::new(ReasoningResponse {
+                    success: true,
+                    triples_inferred: count as u32,
+                    message: format!(
+                        "Materialized {} triples in namespace '{}'",
+                        count, namespace
+                    ),
+                })),
                 Err(e) => Err(Status::internal(e.to_string())),
             }
         } else {
             match reasoner.apply(&store.store) {
-                Ok(triples) => {
-                    Ok(Response::new(ReasoningResponse {
-                        success: true,
-                        triples_inferred: triples.len() as u32,
-                        message: format!("Found {} inferred triples in namespace '{}'", triples.len(), namespace),
-                    }))
-                },
+                Ok(triples) => Ok(Response::new(ReasoningResponse {
+                    success: true,
+                    triples_inferred: triples.len() as u32,
+                    message: format!(
+                        "Found {} inferred triples in namespace '{}'",
+                        triples.len(),
+                        namespace
+                    ),
+                })),
                 Err(e) => Err(Status::internal(e.to_string())),
             }
         };
@@ -454,7 +531,7 @@ impl SemanticEngine for MySemanticEngine {
                 start_triples,
                 inferred,
                 0, // Duplicates skipped not easily tracked here without changing reasoner return signature
-                vec![] // Sample inferences
+                vec![], // Sample inferences
             );
         }
 
@@ -462,7 +539,9 @@ impl SemanticEngine for MySemanticEngine {
     }
 }
 
-pub async fn run_mcp_stdio(engine: Arc<MySemanticEngine>) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn run_mcp_stdio(
+    engine: Arc<MySemanticEngine>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let server = crate::mcp_stdio::McpStdioServer::new(engine);
     server.run().await
 }
