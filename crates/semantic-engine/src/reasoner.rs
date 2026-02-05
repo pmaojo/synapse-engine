@@ -1,7 +1,6 @@
 use anyhow::Result;
 use oxigraph::model::*;
 use oxigraph::store::Store;
-use oxigraph::store::Store;
 
 /// Reasoning strategy for knowledge graph inference
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -141,22 +140,24 @@ impl SynapseReasoner {
             let type_prop = NamedNode::new("http://www.w3.org/1999/02/22-rdf-syntax-ns#type")?;
             let symmetric_class = NamedNode::new("http://www.w3.org/2002/07/owl#SymmetricProperty")?;
             
-            // Find all symmetric properties
             for quad in store.quads_for_pattern(None, Some(type_prop.as_ref().into()), Some(symmetric_class.as_ref().into()), None) {
                 if let Ok(q) = quad {
-                    let p = q.subject; // p is symmetric
-                    
-                    // Find all triples using p: x p y
-                    for edge in store.quads_for_pattern(None, Some(p.as_ref().into()), None, None) {
-                        if let Ok(e) = edge {
-                            // Infer: y p x
-                            if let Term::NamedNode(obj_node) = e.object {
-                                let s_str = e.subject.to_string();
-                                let p_str = p.to_string();
-                                let o_str = obj_node.to_string();
-                                inferred.push((o_str, p_str, s_str));
-                            }
-                        }
+                    // Check if subject is a NamedNode (properties must be named)
+                    if let Subject::NamedNode(p_node) = q.subject {
+                         let p_ref = p_node.as_ref();
+                         
+                         // Find all triples using p: x p y
+                         for edge in store.quads_for_pattern(None, Some(p_ref.into()), None, None) {
+                             if let Ok(e) = edge {
+                                 // Infer: y p x
+                                 if let Term::NamedNode(obj_node) = e.object {
+                                     let s_str = e.subject.to_string();
+                                     let p_str = p_node.to_string();
+                                     let o_str = obj_node.to_string();
+                                     inferred.push((o_str, p_str, s_str));
+                                 }
+                             }
+                         }
                     }
                 }
             }
@@ -169,28 +170,27 @@ impl SynapseReasoner {
 
             for quad in store.quads_for_pattern(None, Some(type_prop.as_ref().into()), Some(transitive_class.as_ref().into()), None) {
                 if let Ok(q) = quad {
-                    let p = q.subject; 
-                    
-                    // Naive transitive closure: x p y AND y p z => x p z
-                    // WARNING: This is O(N^3) in worst case, limiting depth is advised.
-                    // For now, we do one hop.
-                    let p_ref = p.as_ref();
-                    
-                    for xy in store.quads_for_pattern(None, Some(p_ref.into()), None, None) {
-                        if let Ok(xy_quad) = xy {
-                            if let Term::NamedNode(y) = xy_quad.object {
-                                for yz in store.quads_for_pattern(Some(y.as_ref().into()), Some(p_ref.into()), None, None) {
-                                    if let Ok(yz_quad) = yz {
-                                        inferred.push((
-                                            xy_quad.subject.to_string(),
-                                            p.to_string(),
-                                            yz_quad.object.to_string()
-                                        ));
-                                    }
-                                }
-                            }
-                        }
-                    }
+                     if let Subject::NamedNode(p_node) = q.subject {
+                         let p_ref = p_node.as_ref();
+                         
+                         // Naive transitive: x p y ("xy")
+                         for xy in store.quads_for_pattern(None, Some(p_ref.into()), None, None) {
+                             if let Ok(xy_quad) = xy {
+                                 if let Term::NamedNode(y) = xy_quad.object {
+                                     // Find y p z ("yz")
+                                     for yz in store.quads_for_pattern(Some(y.as_ref().into()), Some(p_ref.into()), None, None) {
+                                         if let Ok(yz_quad) = yz {
+                                             inferred.push((
+                                                 xy_quad.subject.to_string(),
+                                                 p_node.to_string(),
+                                                 yz_quad.object.to_string()
+                                             ));
+                                         }
+                                     }
+                                 }
+                             }
+                         }
+                     }
                 }
             }
         }
@@ -199,20 +199,21 @@ impl SynapseReasoner {
         if rules.inverse_of {
             let inverse_prop = NamedNode::new("http://www.w3.org/2002/07/owl#inverseOf")?;
             
-            // Find p1 inverseOf p2
             for quad in store.quads_for_pattern(None, Some(inverse_prop.as_ref().into()), None, None) {
                 if let Ok(q) = quad {
-                    let p1 = q.subject;
-                    if let Term::NamedNode(p2) = q.object {
-                        // For every x p1 y, infer y p2 x
-                        for edge in store.quads_for_pattern(None, Some(p1.as_ref().into()), None, None) {
-                            if let Ok(e) = edge {
-                                if let Term::NamedNode(y) = e.object {
-                                    inferred.push((
-                                        y.to_string(),
-                                        p2.to_string(),
-                                        e.subject.to_string()
-                                    ));
+                    if let Subject::NamedNode(p1_node) = q.subject {
+                        let p1_ref = p1_node.as_ref();
+                        if let Term::NamedNode(p2_node) = q.object {
+                            // p1 inverseOf p2. For every x p1 y, infer y p2 x
+                            for edge in store.quads_for_pattern(None, Some(p1_ref.into()), None, None) {
+                                if let Ok(e) = edge {
+                                    if let Term::NamedNode(y) = e.object {
+                                        inferred.push((
+                                            y.to_string(),
+                                            p2_node.to_string(),
+                                            e.subject.to_string()
+                                        ));
+                                    }
                                 }
                             }
                         }

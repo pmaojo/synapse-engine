@@ -1,6 +1,6 @@
 ========================================
 SYNAPSE CODEBASE EXTRACTION
-Generated: Thu Feb  5 01:37:42 WET 2026
+Generated: Thu Feb  5 01:52:28 WET 2026
 ========================================
 
 
@@ -574,6 +574,7 @@ pub mod ingest;
 pub mod auth;
 pub mod audit;
 pub mod disambiguation;
+pub mod processor;
 
 
 ========================================
@@ -1235,6 +1236,10 @@ impl McpStdioServer {
             .collect::<Vec<_>>()
             .join(" ");
 
+        // Chunk text
+        let processor = crate::processor::TextProcessor::new();
+        let chunks = processor.chunk_text(&text, 1000);
+
         // Add to vector store
         let store = match self.engine.get_store(namespace) {
             Ok(s) => s,
@@ -1242,14 +1247,22 @@ impl McpStdioServer {
         };
 
         if let Some(ref vector_store) = store.vector_store {
-            match vector_store.add(url, &text).await {
-                Ok(_) => self.tool_result(id, &format!("Ingested URL: {} ({} chars)", url, text.len()), false),
-                Err(e) => self.tool_result(id, &format!("Vector store error: {}", e), true),
+            let mut added_chunks = 0;
+            for (i, chunk) in chunks.iter().enumerate() {
+                let chunk_uri = format!("{}#chunk-{}", url, i);
+                match vector_store.add(&chunk_uri, chunk).await {
+                    Ok(_) => added_chunks += 1,
+                    Err(e) => {
+                        eprintln!("Failed to add chunk {}: {}", i, e);
+                    }
+                }
             }
+            self.tool_result(id, &format!("Ingested URL: {} ({} chars, {} chunks)", url, text.len(), added_chunks), false)
         } else {
             self.tool_result(id, "Vector store not available", true)
         }
     }
+
 
     async fn call_ingest_text(
         &self,
@@ -1266,6 +1279,10 @@ impl McpStdioServer {
         };
         let namespace = args.get("namespace").and_then(|v| v.as_str()).unwrap_or("default");
 
+        // Chunk text
+        let processor = crate::processor::TextProcessor::new();
+        let chunks = processor.chunk_text(&content, 1000);
+
         // Add to vector store
         let store = match self.engine.get_store(namespace) {
             Ok(s) => s,
@@ -1273,10 +1290,17 @@ impl McpStdioServer {
         };
 
         if let Some(ref vector_store) = store.vector_store {
-            match vector_store.add(uri, content).await {
-                Ok(_) => self.tool_result(id, &format!("Ingested text: {} ({} chars)", uri, content.len()), false),
-                Err(e) => self.tool_result(id, &format!("Vector store error: {}", e), true),
+            let mut added_chunks = 0;
+            for (i, chunk) in chunks.iter().enumerate() {
+                let chunk_uri = if chunks.len() > 1 { format!("{}#chunk-{}", uri, i) } else { uri.to_string() };
+                match vector_store.add(&chunk_uri, chunk).await {
+                    Ok(_) => added_chunks += 1,
+                    Err(e) => {
+                        eprintln!("Failed to add chunk {}: {}", i, e);
+                    }
+                }
             }
+            self.tool_result(id, &format!("Ingested text: {} ({} chars, {} chunks)", uri, content.len(), added_chunks), false)
         } else {
             self.tool_result(id, "Vector store not available", true)
         }
@@ -1665,13 +1689,73 @@ impl GraphSnapshot {
 
 
 ========================================
+FILE: crates/semantic-engine/src/processor.rs
+========================================
+
+/// Simple semantic chunker for text processing
+pub struct TextProcessor;
+
+impl TextProcessor {
+    pub fn new() -> Self {
+        Self
+    }
+
+    /// Split text into recursive chunks
+    /// Simple implementation: split by double newline (paragraphs), then by newline, then by length
+    pub fn chunk_text(&self, text: &str, max_chars: usize) -> Vec<String> {
+        let mut chunks = Vec::new();
+        
+        // 1. Split by paragraphs
+        let paragraphs: Vec<&str> = text.split("\n\n").collect();
+        
+        for p in paragraphs {
+            if p.len() <= max_chars {
+                if !p.trim().is_empty() {
+                    chunks.push(p.to_string());
+                }
+            } else {
+                // 2. Split by sentences (naive period check) or newlines
+                let lines: Vec<&str> = p.split('\n').collect();
+                let mut current_chunk = String::new();
+                
+                for line in lines {
+                    if current_chunk.len() + line.len() + 1 > max_chars {
+                        if !current_chunk.is_empty() {
+                            chunks.push(current_chunk.clone());
+                            current_chunk.clear();
+                        }
+                        // If line itself is too long, we truncate/force split (simplification)
+                        if line.len() > max_chars {
+                            chunks.push(line[..max_chars].to_string());
+                             // Drop remainder for simplicity in this MVP
+                        } else {
+                            current_chunk = line.to_string();
+                        }
+                    } else {
+                        if !current_chunk.is_empty() {
+                            current_chunk.push('\n');
+                        }
+                        current_chunk.push_str(line);
+                    }
+                }
+                if !current_chunk.is_empty() {
+                    chunks.push(current_chunk);
+                }
+            }
+        }
+        
+        chunks
+    }
+}
+
+
+========================================
 FILE: crates/semantic-engine/src/reasoner.rs
 ========================================
 
 use anyhow::Result;
 use oxigraph::model::*;
 use oxigraph::store::Store;
-use reasonable::reasoner::ReasonerBuilder;
 
 /// Reasoning strategy for knowledge graph inference
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1803,29 +1887,98 @@ impl SynapseReasoner {
     }
 
     fn apply_owl_reasoning(&self, store: &Store) -> Result<Vec<(String, String, String)>> {
-        let mut builder = ReasonerBuilder::new();
-        
-        // reasonable 0.3.2 with_triples_str requires &'static str.
-        // We use Box::leak here to bypass the version mismatch between oxrdf crates
-        // used by oxigraph and reasonable. This is acceptable for reasoning tasks
-        // as the strings are lived for the duration of the reasoning process.
-        let mut trips: Vec<(&'static str, &'static str, &'static str)> = Vec::new();
-        for quad in store.iter() {
-            if let Ok(q) = quad {
-                let s: &'static str = Box::leak(q.subject.to_string().into_boxed_str());
-                let p: &'static str = Box::leak(q.predicate.to_string().into_boxed_str());
-                let o: &'static str = Box::leak(q.object.to_string().into_boxed_str());
-                trips.push((s, p, o));
+        let mut inferred = Vec::new();
+        let rules = &self.rules;
+
+        // 1. Symmetric Property
+        if rules.symmetric_property {
+            let type_prop = NamedNode::new("http://www.w3.org/1999/02/22-rdf-syntax-ns#type")?;
+            let symmetric_class = NamedNode::new("http://www.w3.org/2002/07/owl#SymmetricProperty")?;
+            
+            for quad in store.quads_for_pattern(None, Some(type_prop.as_ref().into()), Some(symmetric_class.as_ref().into()), None) {
+                if let Ok(q) = quad {
+                    // Check if subject is a NamedNode (properties must be named)
+                    if let Subject::NamedNode(p_node) = q.subject {
+                         let p_ref = p_node.as_ref();
+                         
+                         // Find all triples using p: x p y
+                         for edge in store.quads_for_pattern(None, Some(p_ref.into()), None, None) {
+                             if let Ok(e) = edge {
+                                 // Infer: y p x
+                                 if let Term::NamedNode(obj_node) = e.object {
+                                     let s_str = e.subject.to_string();
+                                     let p_str = p_node.to_string();
+                                     let o_str = obj_node.to_string();
+                                     inferred.push((o_str, p_str, s_str));
+                                 }
+                             }
+                         }
+                    }
+                }
             }
         }
-        
-        builder = builder.with_triples_str(trips);
-        let mut reasoner = builder.build().map_err(|e| anyhow::anyhow!("Failed to build reasoner: {}", e))?;
-        
-        reasoner.reason();
-        Ok(reasoner.get_triples_string())
-    }
 
+        // 2. Transitive Property
+        if rules.transitive_property {
+            let type_prop = NamedNode::new("http://www.w3.org/1999/02/22-rdf-syntax-ns#type")?;
+            let transitive_class = NamedNode::new("http://www.w3.org/2002/07/owl#TransitiveProperty")?;
+
+            for quad in store.quads_for_pattern(None, Some(type_prop.as_ref().into()), Some(transitive_class.as_ref().into()), None) {
+                if let Ok(q) = quad {
+                     if let Subject::NamedNode(p_node) = q.subject {
+                         let p_ref = p_node.as_ref();
+                         
+                         // Naive transitive: x p y ("xy")
+                         for xy in store.quads_for_pattern(None, Some(p_ref.into()), None, None) {
+                             if let Ok(xy_quad) = xy {
+                                 if let Term::NamedNode(y) = xy_quad.object {
+                                     // Find y p z ("yz")
+                                     for yz in store.quads_for_pattern(Some(y.as_ref().into()), Some(p_ref.into()), None, None) {
+                                         if let Ok(yz_quad) = yz {
+                                             inferred.push((
+                                                 xy_quad.subject.to_string(),
+                                                 p_node.to_string(),
+                                                 yz_quad.object.to_string()
+                                             ));
+                                         }
+                                     }
+                                 }
+                             }
+                         }
+                     }
+                }
+            }
+        }
+
+        // 3. InverseOf
+        if rules.inverse_of {
+            let inverse_prop = NamedNode::new("http://www.w3.org/2002/07/owl#inverseOf")?;
+            
+            for quad in store.quads_for_pattern(None, Some(inverse_prop.as_ref().into()), None, None) {
+                if let Ok(q) = quad {
+                    if let Subject::NamedNode(p1_node) = q.subject {
+                        let p1_ref = p1_node.as_ref();
+                        if let Term::NamedNode(p2_node) = q.object {
+                            // p1 inverseOf p2. For every x p1 y, infer y p2 x
+                            for edge in store.quads_for_pattern(None, Some(p1_ref.into()), None, None) {
+                                if let Ok(e) = edge {
+                                    if let Term::NamedNode(y) = e.object {
+                                        inferred.push((
+                                            y.to_string(),
+                                            p2_node.to_string(),
+                                            e.subject.to_string()
+                                        ));
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(inferred)
+    }
     pub fn materialize(&self, store: &Store) -> Result<usize> {
         let inferred = self.apply(store)?;
         let mut count = 0;
@@ -1930,16 +2083,26 @@ use crate::server::proto::{ReasoningStrategy, SearchMode};
 use crate::ingest::IngestionEngine;
 use std::path::Path;
 
+use crate::auth::NamespaceAuth;
+use crate::audit::InferenceAudit;
+
 pub struct MySemanticEngine {
     pub storage_path: String,
     pub stores: DashMap<String, Arc<SynapseStore>>,
+    pub auth: Arc<NamespaceAuth>,
+    pub audit: Arc<InferenceAudit>,
 }
 
 impl MySemanticEngine {
     pub fn new(storage_path: &str) -> Self {
+        let auth = Arc::new(NamespaceAuth::new());
+        auth.load_from_env();
+        
         Self {
             storage_path: storage_path.to_string(),
             stores: DashMap::new(),
+            auth,
+            audit: Arc::new(InferenceAudit::new()),
         }
     }
 
@@ -1963,8 +2126,15 @@ impl SemanticEngine for MySemanticEngine {
         &self,
         request: Request<IngestRequest>,
     ) -> Result<Response<IngestResponse>, Status> {
+        // Auth check (Write permission)
+        let token = request.metadata().get("authorization").and_then(|t| t.to_str().ok()).map(|s| s.trim_start_matches("Bearer ").to_string());
         let req = request.into_inner();
         let namespace = if req.namespace.is_empty() { "default" } else { &req.namespace };
+        
+        if let Err(e) = self.auth.check(token.as_deref(), namespace, "write") {
+             return Err(Status::permission_denied(e));
+        }
+        
         let store = self.get_store(namespace)?;
 
         // Log provenance for audit
@@ -2298,8 +2468,15 @@ impl SemanticEngine for MySemanticEngine {
         &self,
         request: Request<ReasoningRequest>,
     ) -> Result<Response<ReasoningResponse>, Status> {
+        // Auth check (Reason permission)
+        let token = request.metadata().get("authorization").and_then(|t| t.to_str().ok()).map(|s| s.trim_start_matches("Bearer ").to_string());
         let req = request.into_inner();
         let namespace = if req.namespace.is_empty() { "default" } else { &req.namespace };
+        
+        if let Err(e) = self.auth.check(token.as_deref(), namespace, "reason") {
+             return Err(Status::permission_denied(e));
+        }
+
         let store = self.get_store(namespace)?;
         
         let strategy = match ReasoningStrategy::try_from(req.strategy) {
@@ -2307,28 +2484,49 @@ impl SemanticEngine for MySemanticEngine {
             Ok(ReasoningStrategy::Owlrl) => InternalStrategy::OWLRL,
             _ => InternalStrategy::None,
         };
+        let strategy_name = format!("{:?}", strategy);
 
         let reasoner = SynapseReasoner::new(strategy);
+        let start_triples = store.store.len().unwrap_or(0);
         
-        if req.materialize {
+        let response = if req.materialize {
             match reasoner.materialize(&store.store) {
-                Ok(count) => Ok(Response::new(ReasoningResponse {
-                    success: true,
-                    triples_inferred: count as u32,
-                    message: format!("Materialized {} triples in namespace '{}'", count, namespace),
-                })),
+                Ok(count) => {
+                    Ok(Response::new(ReasoningResponse {
+                        success: true,
+                        triples_inferred: count as u32,
+                        message: format!("Materialized {} triples in namespace '{}'", count, namespace),
+                    }))
+                },
                 Err(e) => Err(Status::internal(e.to_string())),
             }
         } else {
             match reasoner.apply(&store.store) {
-                Ok(triples) => Ok(Response::new(ReasoningResponse {
-                    success: true,
-                    triples_inferred: triples.len() as u32,
-                    message: format!("Found {} inferred triples in namespace '{}'", triples.len(), namespace),
-                })),
+                Ok(triples) => {
+                    Ok(Response::new(ReasoningResponse {
+                        success: true,
+                        triples_inferred: triples.len() as u32,
+                        message: format!("Found {} inferred triples in namespace '{}'", triples.len(), namespace),
+                    }))
+                },
                 Err(e) => Err(Status::internal(e.to_string())),
             }
+        };
+
+        // Audit Log
+        if let Ok(ref res) = response {
+            let inferred = res.get_ref().triples_inferred as usize;
+            self.audit.log(
+                namespace,
+                &strategy_name,
+                start_triples,
+                inferred,
+                0, // Duplicates skipped not easily tracked here without changing reasoner return signature
+                vec![] // Sample inferences
+            );
         }
+
+        response
     }
 }
 

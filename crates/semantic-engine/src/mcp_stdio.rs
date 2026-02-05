@@ -613,6 +613,10 @@ impl McpStdioServer {
             .collect::<Vec<_>>()
             .join(" ");
 
+        // Chunk text
+        let processor = crate::processor::TextProcessor::new();
+        let chunks = processor.chunk_text(&text, 1000);
+
         // Add to vector store
         let store = match self.engine.get_store(namespace) {
             Ok(s) => s,
@@ -620,14 +624,22 @@ impl McpStdioServer {
         };
 
         if let Some(ref vector_store) = store.vector_store {
-            match vector_store.add(url, &text).await {
-                Ok(_) => self.tool_result(id, &format!("Ingested URL: {} ({} chars)", url, text.len()), false),
-                Err(e) => self.tool_result(id, &format!("Vector store error: {}", e), true),
+            let mut added_chunks = 0;
+            for (i, chunk) in chunks.iter().enumerate() {
+                let chunk_uri = format!("{}#chunk-{}", url, i);
+                match vector_store.add(&chunk_uri, chunk).await {
+                    Ok(_) => added_chunks += 1,
+                    Err(e) => {
+                        eprintln!("Failed to add chunk {}: {}", i, e);
+                    }
+                }
             }
+            self.tool_result(id, &format!("Ingested URL: {} ({} chars, {} chunks)", url, text.len(), added_chunks), false)
         } else {
             self.tool_result(id, "Vector store not available", true)
         }
     }
+
 
     async fn call_ingest_text(
         &self,
@@ -644,6 +656,10 @@ impl McpStdioServer {
         };
         let namespace = args.get("namespace").and_then(|v| v.as_str()).unwrap_or("default");
 
+        // Chunk text
+        let processor = crate::processor::TextProcessor::new();
+        let chunks = processor.chunk_text(&content, 1000);
+
         // Add to vector store
         let store = match self.engine.get_store(namespace) {
             Ok(s) => s,
@@ -651,10 +667,17 @@ impl McpStdioServer {
         };
 
         if let Some(ref vector_store) = store.vector_store {
-            match vector_store.add(uri, content).await {
-                Ok(_) => self.tool_result(id, &format!("Ingested text: {} ({} chars)", uri, content.len()), false),
-                Err(e) => self.tool_result(id, &format!("Vector store error: {}", e), true),
+            let mut added_chunks = 0;
+            for (i, chunk) in chunks.iter().enumerate() {
+                let chunk_uri = if chunks.len() > 1 { format!("{}#chunk-{}", uri, i) } else { uri.to_string() };
+                match vector_store.add(&chunk_uri, chunk).await {
+                    Ok(_) => added_chunks += 1,
+                    Err(e) => {
+                        eprintln!("Failed to add chunk {}: {}", i, e);
+                    }
+                }
             }
+            self.tool_result(id, &format!("Ingested text: {} ({} chars, {} chunks)", uri, content.len(), added_chunks), false)
         } else {
             self.tool_result(id, "Vector store not available", true)
         }
