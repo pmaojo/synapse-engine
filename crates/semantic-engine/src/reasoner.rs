@@ -88,6 +88,7 @@ impl SynapseReasoner {
     pub fn materialize(&self, store: &Store) -> Result<usize> {
         let inferred = self.apply(store)?;
         let mut count = 0;
+        let mut skipped = 0;
         
         for (s, p, o) in inferred {
             if let (Ok(subject), Ok(predicate), Ok(object)) = (
@@ -95,10 +96,20 @@ impl SynapseReasoner {
                 NamedNode::new(&p),
                 NamedNode::new(&o),
             ) {
-                // oxigraph 0.3 uses DefaultGraph
-                let _ = store.insert(&Quad::new(subject, predicate, object, GraphName::DefaultGraph));
+                // Check if triple already exists to avoid duplicates
+                let quad = Quad::new(subject.clone(), predicate.clone(), object.clone(), GraphName::DefaultGraph);
+                if store.contains(&quad)? {
+                    skipped += 1;
+                    continue;
+                }
+                // Insert new inferred triple
+                let _ = store.insert(&quad);
                 count += 1;
             }
+        }
+        
+        if skipped > 0 {
+            eprintln!("Reasoning: {} new triples, {} duplicates skipped", count, skipped);
         }
         
         Ok(count)

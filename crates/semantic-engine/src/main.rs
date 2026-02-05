@@ -16,7 +16,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let engine = MySemanticEngine::new(&storage_path);
 
     if is_mcp {
-        println!("🚀 Starting Synapse-MCP (stdio mode)...");
+        // MCP mode: no stdout messages, only JSON-RPC
+        eprintln!("Synapse-MCP starting (stdio mode)...");
         run_mcp_stdio(Arc::new(engine)).await?;
     } else {
         let addr = "[::1]:50051".parse()?;

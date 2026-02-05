@@ -18,7 +18,7 @@ impl IngestionEngine {
         Self { store }
     }
 
-    pub async fn ingest_file(&self, path: &Path, namespace: &str) -> Result<u32> {
+    pub async fn ingest_file(&self, path: &Path, _namespace: &str) -> Result<u32> {
         let content = fs::read_to_string(path)
             .with_context(|| format!("Failed to read file: {:?}", path))?;
         

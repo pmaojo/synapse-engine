@@ -79,6 +79,9 @@ message IngestResponse {
 message NodeRequest {
     uint32 node_id = 1;
     string namespace = 2;
+    string direction = 3;    // "outgoing", "incoming", or "both" (default: "outgoing")
+    uint32 depth = 4;        // Traversal depth (default: 1)
+    string edge_filter = 5;  // Optional: filter by edge type (predicate)
 }
 
 message NeighborResponse {
@@ -88,6 +91,8 @@ message NeighborResponse {
 message Neighbor {
     uint32 node_id = 1;
     string edge_type = 2;
+    string uri = 3;           // Full URI of the neighbor
+    string direction = 4;     // "outgoing" or "incoming"
 }
 
 message SearchRequest {

@@ -1,0 +1,2471 @@
+========================================
+SYNAPSE CODEBASE EXTRACTION
+Generated: Thu Feb  5 01:19:17 WET 2026
+========================================
+
+
+========================================
+FILE: crates/semantic-engine/build.rs
+========================================
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    tonic_build::compile_protos("proto/semantic_engine.proto")?;
+    Ok(())
+}
+
+
+========================================
+FILE: crates/semantic-engine/examples/grpc_verify.rs
+========================================
+
+use synapse_core::server::proto::semantic_engine_client::SemanticEngineClient;
+use synapse_core::server::proto::{
+    IngestRequest, Triple, Provenance, HybridSearchRequest, SearchMode, ReasoningRequest, ReasoningStrategy
+};
+use tonic::transport::Channel;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    println!("Connecting to Synapse gRPC server...");
+    let mut client = SemanticEngineClient::connect("http://[::1]:50051").await?;
+
+    println!("✅ Connected!");
+
+    // 1. Ingest Data
+    let triple = Triple {
+        subject: "http://example.org/Socrates".to_string(),
+        predicate: "http://www.w3.org/1999/02/22-rdf-syntax-ns#type".to_string(),
+        object: "http://example.org/Human".to_string(),
+        provenance: Some(Provenance {
+            source: "client_test".to_string(),
+            timestamp: "now".to_string(),
+            method: "grpc".to_string(),
+        }),
+        embedding: vec![],
+    };
+    
+    let triple2 = Triple {
+        subject: "http://example.org/Human".to_string(),
+        predicate: "http://www.w3.org/2000/01/rdf-schema#subClassOf".to_string(),
+        object: "http://example.org/Mortal".to_string(),
+        provenance: Some(Provenance {
+            source: "client_test".to_string(),
+            timestamp: "now".to_string(),
+            method: "grpc".to_string(),
+        }),
+        embedding: vec![],
+    };
+
+    println!("Sending IngestRequest...");
+    let response = client.ingest_triples(IngestRequest {
+        triples: vec![triple, triple2],
+        namespace: "test_verification".to_string(),
+    }).await?;
+    println!("Response: {:?}", response.into_inner());
+
+    // 2. Apply Reasoning (RDFS Transitivity)
+    println!("\nApplying RDFS Reasoning (Internal)...");
+    let reasoning_response = client.apply_reasoning(ReasoningRequest {
+        namespace: "test_verification".to_string(),
+        strategy: ReasoningStrategy::Rdfs as i32,
+        materialize: false,
+    }).await?;
+    println!("Reasoning Result: {:?}", reasoning_response.into_inner());
+
+    // 3. Hybrid Search
+    println!("\nPerforming Hybrid Search for 'Socrates'...");
+    let search_response = client.hybrid_search(HybridSearchRequest {
+        query: "Socrates".to_string(),
+        namespace: "test_verification".to_string(),
+        vector_k: 5,
+        graph_depth: 1,
+        mode: SearchMode::Hybrid as i32,
+        limit: 10,
+    }).await?;
+    
+    println!("Search Results:");
+    for result in search_response.into_inner().results {
+        println!(" - [Score: {:.4}] {} ({})", result.score, result.content, result.uri);
+    }
+
+    Ok(())
+}
+
+
+========================================
+FILE: crates/semantic-engine/src/ingest/extractor.rs
+========================================
+
+use anyhow::Result;
+
+pub struct ExtractionResult {
+    pub triples: Vec<(String, String, String)>,
+}
+
+pub trait Extractor {
+    fn extract(&self, content: &str) -> Result<ExtractionResult>;
+}
+
+pub struct CsvExtractor {
+    pub delimiter: u8,
+}
+
+impl CsvExtractor {
+    pub fn new() -> Self {
+        Self { delimiter: b',' }
+    }
+}
+
+impl Extractor for CsvExtractor {
+    fn extract(&self, content: &str) -> Result<ExtractionResult> {
+        let mut rdr = csv::ReaderBuilder::new()
+            .delimiter(self.delimiter)
+            .from_reader(content.as_bytes());
+        
+        let headers = rdr.headers()?.clone();
+        let mut triples = Vec::new();
+        
+        for result in rdr.records() {
+            let record = result?;
+            if let Some(subject) = record.get(0) {
+                if subject.trim().is_empty() { continue; }
+                
+                for (i, value) in record.iter().enumerate().skip(1) {
+                    if let Some(predicate) = headers.get(i) {
+                        let val_trimmed = value.trim();
+                        if !val_trimmed.is_empty() {
+                            triples.push((
+                                subject.to_string(),
+                                predicate.to_string(),
+                                val_trimmed.to_string()
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        
+        Ok(ExtractionResult { triples })
+    }
+}
+
+pub struct MarkdownExtractor;
+
+impl Extractor for MarkdownExtractor {
+    fn extract(&self, content: &str) -> Result<ExtractionResult> {
+        let mut triples = Vec::new();
+        let mut current_header = String::new();
+        
+        for line in content.lines() {
+            let trimmed = line.trim();
+            if trimmed.is_empty() { continue; }
+            
+            if trimmed.starts_with("#") {
+                current_header = trimmed.trim_start_matches('#').trim().to_string();
+            } else if trimmed.starts_with("- ") || trimmed.starts_with("* ") {
+                if !current_header.is_empty() {
+                    let item = trimmed[2..].trim();
+                    if !item.is_empty() {
+                        triples.push((
+                            current_header.clone(),
+                            "mentions".to_string(),
+                            item.to_string()
+                        ));
+                    }
+                }
+            } else if trimmed.contains(":") {
+                let parts: Vec<&str> = trimmed.splitn(2, ':').collect();
+                if parts.len() == 2 && !current_header.is_empty() {
+                    let predicate = parts[0].trim();
+                    let object = parts[1].trim();
+                    triples.push((
+                        current_header.clone(),
+                        predicate.to_string(),
+                        object.to_string()
+                    ));
+                }
+            }
+        }
+        
+        Ok(ExtractionResult { triples })
+    }
+}
+
+
+========================================
+FILE: crates/semantic-engine/src/ingest/mod.rs
+========================================
+
+use anyhow::{Result, Context};
+use std::path::Path;
+use std::fs;
+use crate::store::SynapseStore;
+use std::sync::Arc;
+
+pub mod processor;
+pub mod extractor;
+
+use extractor::{Extractor, CsvExtractor, MarkdownExtractor};
+
+pub struct IngestionEngine {
+    store: Arc<SynapseStore>,
+}
+
+impl IngestionEngine {
+    pub fn new(store: Arc<SynapseStore>) -> Self {
+        Self { store }
+    }
+
+    pub async fn ingest_file(&self, path: &Path, _namespace: &str) -> Result<u32> {
+        let content = fs::read_to_string(path)
+            .with_context(|| format!("Failed to read file: {:?}", path))?;
+        
+        let extension = path.extension()
+            .and_then(|s| s.to_str())
+            .unwrap_or("");
+
+        let result = match extension {
+            "csv" => CsvExtractor::new().extract(&content)?,
+            "md" | "markdown" => MarkdownExtractor.extract(&content)?,
+            _ => anyhow::bail!("Unsupported file type: {}", extension),
+        };
+
+        let (added, _) = self.store.ingest_triples(result.triples).await?;
+        Ok(added)
+    }
+}
+
+
+========================================
+FILE: crates/semantic-engine/src/ingest/processor.rs
+========================================
+
+// TODO: Implement advanced chunking and processing logic
+
+
+========================================
+FILE: crates/semantic-engine/src/lib.rs
+========================================
+
+pub mod mcp;
+pub mod mcp_stdio;
+pub mod persistence;
+pub mod server;
+pub mod store;
+pub mod vector_store;
+pub mod reasoner;
+pub mod mcp_types;
+pub mod ingest;
+
+
+========================================
+FILE: crates/semantic-engine/src/main.rs
+========================================
+
+use std::env;
+use std::sync::Arc;
+use synapse_core::server::{
+    proto::semantic_engine_server::SemanticEngineServer, MySemanticEngine, run_mcp_stdio
+};
+use tonic::transport::Server;
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let args: Vec<String> = env::args().collect();
+    let is_mcp = args.contains(&"--mcp".to_string());
+
+    // Get storage path from env or default
+    let storage_path = env::var("GRAPH_STORAGE_PATH").unwrap_or_else(|_| "data/graphs".to_string());
+
+    let engine = MySemanticEngine::new(&storage_path);
+
+    if is_mcp {
+        // MCP mode: no stdout messages, only JSON-RPC
+        eprintln!("Synapse-MCP starting (stdio mode)...");
+        run_mcp_stdio(Arc::new(engine)).await?;
+    } else {
+        let addr = "[::1]:50051".parse()?;
+        println!("🚀 Synapse (ex-Grafoso) listening on {}", addr);
+        println!("Storage Path: {}", storage_path);
+
+        Server::builder()
+            .add_service(SemanticEngineServer::new(engine))
+            .serve(addr)
+            .await?;
+    }
+
+    Ok(())
+}
+
+
+========================================
+FILE: crates/semantic-engine/src/mcp_stdio.rs
+========================================
+
+use crate::server::MySemanticEngine;
+use crate::server::proto::semantic_engine_server::SemanticEngine;
+use crate::server::proto::{
+    IngestRequest, IngestFileRequest, Triple, Provenance, 
+    SparqlRequest, HybridSearchRequest, ReasoningRequest,
+    SearchMode, ReasoningStrategy,
+};
+use crate::mcp_types::{McpRequest, McpResponse, McpError, Tool, ListToolsResult, CallToolResult, Content};
+use std::sync::Arc;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+use tonic::Request;
+
+pub struct McpStdioServer {
+    engine: Arc<MySemanticEngine>,
+}
+
+impl McpStdioServer {
+    pub fn new(engine: Arc<MySemanticEngine>) -> Self {
+        Self { engine }
+    }
+
+    pub async fn run(&self) -> Result<(), Box<dyn std::error::Error>> {
+        let mut reader = BufReader::new(tokio::io::stdin());
+        let mut writer = tokio::io::stdout();
+
+        loop {
+            let mut line = String::new();
+            if reader.read_line(&mut line).await? == 0 {
+                break;
+            }
+
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+
+            if let Ok(request) = serde_json::from_str::<McpRequest>(trimmed) {
+                let response = self.handle_request(request).await;
+                let response_json = serde_json::to_string(&response)? + "\n";
+                writer.write_all(response_json.as_bytes()).await?;
+                writer.flush().await?;
+            }
+        }
+
+        Ok(())
+    }
+
+    fn get_tools() -> Vec<Tool> {
+        vec![
+            Tool {
+                name: "ingest_triples".to_string(),
+                description: Some("Ingest one or more RDF triples into the knowledge graph".to_string()),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "triples": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "subject": { "type": "string" },
+                                    "predicate": { "type": "string" },
+                                    "object": { "type": "string" }
+                                },
+                                "required": ["subject", "predicate", "object"]
+                            }
+                        },
+                        "namespace": { "type": "string", "default": "default" }
+                    },
+                    "required": ["triples"]
+                }),
+            },
+            Tool {
+                name: "ingest_file".to_string(),
+                description: Some("Ingest a CSV or Markdown file into the knowledge graph".to_string()),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "path": { "type": "string", "description": "Path to the file" },
+                        "namespace": { "type": "string", "default": "default" }
+                    },
+                    "required": ["path"]
+                }),
+            },
+            Tool {
+                name: "sparql_query".to_string(),
+                description: Some("Execute a SPARQL query against the knowledge graph".to_string()),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "query": { "type": "string", "description": "SPARQL query string" },
+                        "namespace": { "type": "string", "default": "default" }
+                    },
+                    "required": ["query"]
+                }),
+            },
+            Tool {
+                name: "hybrid_search".to_string(),
+                description: Some("Perform a hybrid vector + graph search".to_string()),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "query": { "type": "string", "description": "Natural language query" },
+                        "namespace": { "type": "string", "default": "default" },
+                        "vector_k": { "type": "integer", "default": 10 },
+                        "graph_depth": { "type": "integer", "default": 1 },
+                        "limit": { "type": "integer", "default": 20 }
+                    },
+                    "required": ["query"]
+                }),
+            },
+            Tool {
+                name: "apply_reasoning".to_string(),
+                description: Some("Apply RDFS or OWL-RL reasoning to infer new triples".to_string()),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "namespace": { "type": "string", "default": "default" },
+                        "strategy": { "type": "string", "enum": ["rdfs", "owlrl"], "default": "rdfs" },
+                        "materialize": { "type": "boolean", "default": false }
+                    }
+                }),
+            },
+            Tool {
+                name: "get_neighbors".to_string(),
+                description: Some("Get neighboring nodes connected to a given URI in the graph".to_string()),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "uri": { "type": "string", "description": "URI of the entity to find neighbors for" },
+                        "namespace": { "type": "string", "default": "default" },
+                        "direction": { "type": "string", "enum": ["outgoing", "incoming", "both"], "default": "outgoing" }
+                    },
+                    "required": ["uri"]
+                }),
+            },
+            Tool {
+                name: "list_triples".to_string(),
+                description: Some("List all triples in a namespace (useful for debugging/exploration)".to_string()),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "namespace": { "type": "string", "default": "default" },
+                        "limit": { "type": "integer", "default": 100 }
+                    }
+                }),
+            },
+            Tool {
+                name: "delete_namespace".to_string(),
+                description: Some("Delete all data in a namespace".to_string()),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "namespace": { "type": "string", "description": "Namespace to delete" }
+                    },
+                    "required": ["namespace"]
+                }),
+            },
+            Tool {
+                name: "ingest_url".to_string(),
+                description: Some("Scrape a web page and add its content to the vector store for RAG retrieval".to_string()),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "url": { "type": "string", "description": "URL to scrape and ingest" },
+                        "namespace": { "type": "string", "default": "default" }
+                    },
+                    "required": ["url"]
+                }),
+            },
+            Tool {
+                name: "ingest_text".to_string(),
+                description: Some("Add arbitrary text content to the vector store for RAG retrieval".to_string()),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "uri": { "type": "string", "description": "Custom URI identifier for this text" },
+                        "content": { "type": "string", "description": "Text content to embed and store" },
+                        "namespace": { "type": "string", "default": "default" }
+                    },
+                    "required": ["uri", "content"]
+                }),
+            },
+        ]
+    }
+
+    async fn handle_request(&self, request: McpRequest) -> McpResponse {
+        match request.method.as_str() {
+            "initialize" => {
+                // MCP protocol initialization
+                McpResponse {
+                    jsonrpc: "2.0".to_string(),
+                    id: request.id,
+                    result: Some(serde_json::json!({
+                        "protocolVersion": "2024-11-05",
+                        "capabilities": {
+                            "tools": {}
+                        },
+                        "serverInfo": {
+                            "name": "synapse",
+                            "version": "0.2.0"
+                        }
+                    })),
+                    error: None,
+                }
+            }
+            "notifications/initialized" | "initialized" => {
+                // Client confirms initialization - just acknowledge
+                McpResponse {
+                    jsonrpc: "2.0".to_string(),
+                    id: request.id,
+                    result: Some(serde_json::json!({})),
+                    error: None,
+                }
+            }
+            "tools/list" => {
+                let result = ListToolsResult { tools: Self::get_tools() };
+                McpResponse {
+                    jsonrpc: "2.0".to_string(),
+                    id: request.id,
+                    result: Some(serde_json::to_value(result).unwrap()),
+                    error: None,
+                }
+            }
+            "tools/call" => {
+                self.handle_tool_call(request).await
+            }
+            // Legacy methods for backwards compatibility
+            "ingest" => self.handle_legacy_ingest(request).await,
+            "ingest_file" => self.handle_legacy_ingest_file(request).await,
+            _ => McpResponse {
+                jsonrpc: "2.0".to_string(),
+                id: request.id,
+                result: None,
+                error: Some(McpError {
+                    code: -32601,
+                    message: format!("Method not found: {}", request.method),
+                    data: None,
+                }),
+            },
+        }
+    }
+
+    async fn handle_tool_call(&self, request: McpRequest) -> McpResponse {
+        let params = match request.params {
+            Some(p) => p,
+            None => return self.error_response(request.id, -32602, "Missing params"),
+        };
+
+        let tool_name = match params.get("name").and_then(|v| v.as_str()) {
+            Some(n) => n,
+            None => return self.error_response(request.id, -32602, "Missing tool name"),
+        };
+
+        let arguments = params.get("arguments")
+            .and_then(|v| v.as_object())
+            .cloned()
+            .unwrap_or_default();
+
+        match tool_name {
+            "ingest_triples" => self.call_ingest_triples(request.id, &arguments).await,
+            "ingest_file" => self.call_ingest_file(request.id, &arguments).await,
+            "sparql_query" => self.call_sparql_query(request.id, &arguments).await,
+            "hybrid_search" => self.call_hybrid_search(request.id, &arguments).await,
+            "apply_reasoning" => self.call_apply_reasoning(request.id, &arguments).await,
+            "get_neighbors" => self.call_get_neighbors(request.id, &arguments).await,
+            "list_triples" => self.call_list_triples(request.id, &arguments).await,
+            "delete_namespace" => self.call_delete_namespace(request.id, &arguments).await,
+            "ingest_url" => self.call_ingest_url(request.id, &arguments).await,
+            "ingest_text" => self.call_ingest_text(request.id, &arguments).await,
+            _ => self.error_response(request.id, -32602, &format!("Unknown tool: {}", tool_name)),
+        }
+    }
+
+    async fn call_ingest_triples(
+        &self,
+        id: Option<serde_json::Value>,
+        args: &serde_json::Map<String, serde_json::Value>,
+    ) -> McpResponse {
+        let namespace = args.get("namespace").and_then(|v| v.as_str()).unwrap_or("default");
+        let triples_array = match args.get("triples").and_then(|v| v.as_array()) {
+            Some(t) => t,
+            None => return self.error_response(id, -32602, "Missing 'triples' array"),
+        };
+
+        let mut triples = Vec::new();
+        for t in triples_array {
+            if let (Some(s), Some(p), Some(o)) = (
+                t.get("subject").and_then(|v| v.as_str()),
+                t.get("predicate").and_then(|v| v.as_str()),
+                t.get("object").and_then(|v| v.as_str()),
+            ) {
+                triples.push(Triple {
+                    subject: s.to_string(),
+                    predicate: p.to_string(),
+                    object: o.to_string(),
+                    provenance: Some(Provenance {
+                        source: "mcp".to_string(),
+                        timestamp: "".to_string(),
+                        method: "tools/call".to_string(),
+                    }),
+                    embedding: vec![],
+                });
+            }
+        }
+
+        let req = Request::new(IngestRequest {
+            triples,
+            namespace: namespace.to_string(),
+        });
+
+        match self.engine.ingest_triples(req).await {
+            Ok(resp) => {
+                let inner = resp.into_inner();
+                self.tool_result(id, &format!("Ingested {} triples", inner.edges_added), false)
+            }
+            Err(e) => self.tool_result(id, &e.to_string(), true),
+        }
+    }
+
+    async fn call_ingest_file(
+        &self,
+        id: Option<serde_json::Value>,
+        args: &serde_json::Map<String, serde_json::Value>,
+    ) -> McpResponse {
+        let path = match args.get("path").and_then(|v| v.as_str()) {
+            Some(p) => p,
+            None => return self.error_response(id, -32602, "Missing 'path'"),
+        };
+        let namespace = args.get("namespace").and_then(|v| v.as_str()).unwrap_or("default");
+
+        let req = Request::new(IngestFileRequest {
+            file_path: path.to_string(),
+            namespace: namespace.to_string(),
+        });
+
+        match self.engine.ingest_file(req).await {
+            Ok(resp) => {
+                let inner = resp.into_inner();
+                self.tool_result(id, &format!("Ingested {} triples from {}", inner.edges_added, path), false)
+            }
+            Err(e) => self.tool_result(id, &e.to_string(), true),
+        }
+    }
+
+    async fn call_sparql_query(
+        &self,
+        id: Option<serde_json::Value>,
+        args: &serde_json::Map<String, serde_json::Value>,
+    ) -> McpResponse {
+        let query = match args.get("query").and_then(|v| v.as_str()) {
+            Some(q) => q,
+            None => return self.error_response(id, -32602, "Missing 'query'"),
+        };
+        let namespace = args.get("namespace").and_then(|v| v.as_str()).unwrap_or("default");
+
+        let req = Request::new(SparqlRequest {
+            query: query.to_string(),
+            namespace: namespace.to_string(),
+        });
+
+        match self.engine.query_sparql(req).await {
+            Ok(resp) => {
+                self.tool_result(id, &resp.into_inner().results_json, false)
+            }
+            Err(e) => self.tool_result(id, &e.to_string(), true),
+        }
+    }
+
+    async fn call_hybrid_search(
+        &self,
+        id: Option<serde_json::Value>,
+        args: &serde_json::Map<String, serde_json::Value>,
+    ) -> McpResponse {
+        let query = match args.get("query").and_then(|v| v.as_str()) {
+            Some(q) => q,
+            None => return self.error_response(id, -32602, "Missing 'query'"),
+        };
+        let namespace = args.get("namespace").and_then(|v| v.as_str()).unwrap_or("default");
+        let vector_k = args.get("vector_k").and_then(|v| v.as_u64()).unwrap_or(10) as u32;
+        let graph_depth = args.get("graph_depth").and_then(|v| v.as_u64()).unwrap_or(1) as u32;
+        let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(20) as u32;
+
+        let req = Request::new(HybridSearchRequest {
+            query: query.to_string(),
+            namespace: namespace.to_string(),
+            vector_k,
+            graph_depth,
+            mode: SearchMode::Hybrid as i32,
+            limit,
+        });
+
+        match self.engine.hybrid_search(req).await {
+            Ok(resp) => {
+                let results = resp.into_inner().results;
+                // Manually serialize since proto SearchResult doesn't derive Serialize
+                let json_results: Vec<serde_json::Value> = results.iter().map(|r| {
+                    serde_json::json!({
+                        "node_id": r.node_id,
+                        "score": r.score,
+                        "content": r.content,
+                        "uri": r.uri
+                    })
+                }).collect();
+                let json = serde_json::to_string_pretty(&json_results).unwrap_or_default();
+                self.tool_result(id, &json, false)
+            }
+            Err(e) => self.tool_result(id, &e.to_string(), true),
+        }
+    }
+
+    async fn call_apply_reasoning(
+        &self,
+        id: Option<serde_json::Value>,
+        args: &serde_json::Map<String, serde_json::Value>,
+    ) -> McpResponse {
+        let namespace = args.get("namespace").and_then(|v| v.as_str()).unwrap_or("default");
+        let strategy_str = args.get("strategy").and_then(|v| v.as_str()).unwrap_or("rdfs");
+        let materialize = args.get("materialize").and_then(|v| v.as_bool()).unwrap_or(false);
+
+        let strategy = match strategy_str.to_lowercase().as_str() {
+            "owlrl" | "owl-rl" => ReasoningStrategy::Owlrl as i32,
+            _ => ReasoningStrategy::Rdfs as i32,
+        };
+
+        let req = Request::new(ReasoningRequest {
+            namespace: namespace.to_string(),
+            strategy,
+            materialize,
+        });
+
+        match self.engine.apply_reasoning(req).await {
+            Ok(resp) => {
+                let inner = resp.into_inner();
+                self.tool_result(id, &inner.message, !inner.success)
+            }
+            Err(e) => self.tool_result(id, &e.to_string(), true),
+        }
+    }
+
+    async fn call_get_neighbors(
+        &self,
+        id: Option<serde_json::Value>,
+        args: &serde_json::Map<String, serde_json::Value>,
+    ) -> McpResponse {
+        let uri = match args.get("uri").and_then(|v| v.as_str()) {
+            Some(u) => u,
+            None => return self.error_response(id, -32602, "Missing 'uri'"),
+        };
+        let namespace = args.get("namespace").and_then(|v| v.as_str()).unwrap_or("default");
+        let direction = args.get("direction").and_then(|v| v.as_str()).unwrap_or("outgoing");
+
+        let store = match self.engine.get_store(namespace) {
+            Ok(s) => s,
+            Err(e) => return self.tool_result(id, &e.to_string(), true),
+        };
+
+        let mut neighbors = Vec::new();
+
+        // Query outgoing edges (URI as subject)
+        if direction == "outgoing" || direction == "both" {
+            if let Ok(subj) = oxigraph::model::NamedNodeRef::new(uri) {
+                for quad in store.store.quads_for_pattern(Some(subj.into()), None, None, None) {
+                    if let Ok(q) = quad {
+                        neighbors.push(serde_json::json!({
+                            "direction": "outgoing",
+                            "predicate": q.predicate.to_string(),
+                            "target": q.object.to_string()
+                        }));
+                    }
+                }
+            }
+        }
+
+        // Query incoming edges (URI as object)
+        if direction == "incoming" || direction == "both" {
+            if let Ok(obj) = oxigraph::model::NamedNodeRef::new(uri) {
+                for quad in store.store.quads_for_pattern(None, None, Some(obj.into()), None) {
+                    if let Ok(q) = quad {
+                        neighbors.push(serde_json::json!({
+                            "direction": "incoming",
+                            "predicate": q.predicate.to_string(),
+                            "source": q.subject.to_string()
+                        }));
+                    }
+                }
+            }
+        }
+
+        let json = serde_json::to_string_pretty(&neighbors).unwrap_or_default();
+        self.tool_result(id, &json, false)
+    }
+
+    async fn call_list_triples(
+        &self,
+        id: Option<serde_json::Value>,
+        args: &serde_json::Map<String, serde_json::Value>,
+    ) -> McpResponse {
+        let namespace = args.get("namespace").and_then(|v| v.as_str()).unwrap_or("default");
+        let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(100) as usize;
+
+        let store = match self.engine.get_store(namespace) {
+            Ok(s) => s,
+            Err(e) => return self.tool_result(id, &e.to_string(), true),
+        };
+
+        let mut triples = Vec::new();
+        for quad in store.store.iter().take(limit) {
+            if let Ok(q) = quad {
+                triples.push(serde_json::json!({
+                    "subject": q.subject.to_string(),
+                    "predicate": q.predicate.to_string(),
+                    "object": q.object.to_string()
+                }));
+            }
+        }
+
+        let json = serde_json::to_string_pretty(&triples).unwrap_or_default();
+        self.tool_result(id, &json, false)
+    }
+
+    async fn call_delete_namespace(
+        &self,
+        id: Option<serde_json::Value>,
+        args: &serde_json::Map<String, serde_json::Value>,
+    ) -> McpResponse {
+        let namespace = match args.get("namespace").and_then(|v| v.as_str()) {
+            Some(n) => n,
+            None => return self.error_response(id, -32602, "Missing 'namespace'"),
+        };
+
+        let req = Request::new(crate::server::proto::EmptyRequest {
+            namespace: namespace.to_string(),
+        });
+
+        match self.engine.delete_namespace_data(req).await {
+            Ok(resp) => {
+                let inner = resp.into_inner();
+                self.tool_result(id, &inner.message, !inner.success)
+            }
+            Err(e) => self.tool_result(id, &e.to_string(), true),
+        }
+    }
+
+    async fn call_ingest_url(
+        &self,
+        id: Option<serde_json::Value>,
+        args: &serde_json::Map<String, serde_json::Value>,
+    ) -> McpResponse {
+        let url = match args.get("url").and_then(|v| v.as_str()) {
+            Some(u) => u,
+            None => return self.error_response(id, -32602, "Missing 'url'"),
+        };
+        let namespace = args.get("namespace").and_then(|v| v.as_str()).unwrap_or("default");
+
+        // Fetch URL content
+        let client = reqwest::Client::new();
+        let response = match client.get(url).send().await {
+            Ok(r) => r,
+            Err(e) => return self.tool_result(id, &format!("Failed to fetch URL: {}", e), true),
+        };
+
+        if !response.status().is_success() {
+            return self.tool_result(id, &format!("HTTP error: {}", response.status()), true);
+        }
+
+        let html = match response.text().await {
+            Ok(t) => t,
+            Err(e) => return self.tool_result(id, &format!("Failed to read response: {}", e), true),
+        };
+
+        // Simple HTML to text conversion (strip tags)
+        let text = html
+            .split('<')
+            .filter_map(|s| s.split('>').nth(1))
+            .collect::<Vec<_>>()
+            .join(" ")
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+
+        // Add to vector store
+        let store = match self.engine.get_store(namespace) {
+            Ok(s) => s,
+            Err(e) => return self.tool_result(id, &e.to_string(), true),
+        };
+
+        if let Some(ref vector_store) = store.vector_store {
+            match vector_store.add(url, &text).await {
+                Ok(_) => self.tool_result(id, &format!("Ingested URL: {} ({} chars)", url, text.len()), false),
+                Err(e) => self.tool_result(id, &format!("Vector store error: {}", e), true),
+            }
+        } else {
+            self.tool_result(id, "Vector store not available", true)
+        }
+    }
+
+    async fn call_ingest_text(
+        &self,
+        id: Option<serde_json::Value>,
+        args: &serde_json::Map<String, serde_json::Value>,
+    ) -> McpResponse {
+        let uri = match args.get("uri").and_then(|v| v.as_str()) {
+            Some(u) => u,
+            None => return self.error_response(id, -32602, "Missing 'uri'"),
+        };
+        let content = match args.get("content").and_then(|v| v.as_str()) {
+            Some(c) => c,
+            None => return self.error_response(id, -32602, "Missing 'content'"),
+        };
+        let namespace = args.get("namespace").and_then(|v| v.as_str()).unwrap_or("default");
+
+        // Add to vector store
+        let store = match self.engine.get_store(namespace) {
+            Ok(s) => s,
+            Err(e) => return self.tool_result(id, &e.to_string(), true),
+        };
+
+        if let Some(ref vector_store) = store.vector_store {
+            match vector_store.add(uri, content).await {
+                Ok(_) => self.tool_result(id, &format!("Ingested text: {} ({} chars)", uri, content.len()), false),
+                Err(e) => self.tool_result(id, &format!("Vector store error: {}", e), true),
+            }
+        } else {
+            self.tool_result(id, "Vector store not available", true)
+        }
+    }
+
+    // Legacy handlers for backward compatibility
+    async fn handle_legacy_ingest(&self, request: McpRequest) -> McpResponse {
+        let params = match request.params {
+            Some(p) => p,
+            None => return self.error_response(request.id, -32602, "Invalid params"),
+        };
+
+        if let (Some(sub), Some(pred), Some(obj)) = (
+            params.get("subject").and_then(|v| v.as_str()),
+            params.get("predicate").and_then(|v| v.as_str()),
+            params.get("object").and_then(|v| v.as_str()),
+        ) {
+            let namespace = params.get("namespace").and_then(|v| v.as_str()).unwrap_or("default");
+            let triple = Triple {
+                subject: sub.to_string(),
+                predicate: pred.to_string(),
+                object: obj.to_string(),
+                provenance: Some(Provenance {
+                    source: "mcp".to_string(),
+                    timestamp: "".to_string(),
+                    method: "stdio".to_string(),
+                }),
+                embedding: vec![],
+            };
+
+            let req = Request::new(IngestRequest {
+                triples: vec![triple],
+                namespace: namespace.to_string(),
+            });
+
+            match self.engine.ingest_triples(req).await {
+                Ok(_) => McpResponse {
+                    jsonrpc: "2.0".to_string(),
+                    id: request.id,
+                    result: Some(serde_json::to_value("Ingested").unwrap()),
+                    error: None,
+                },
+                Err(e) => self.error_response(request.id, -32000, &e.to_string()),
+            }
+        } else {
+            self.error_response(request.id, -32602, "Invalid params")
+        }
+    }
+
+    async fn handle_legacy_ingest_file(&self, request: McpRequest) -> McpResponse {
+        let params = match request.params {
+            Some(p) => p,
+            None => return self.error_response(request.id, -32602, "Invalid params: 'path' required"),
+        };
+
+        if let Some(path) = params.get("path").and_then(|v| v.as_str()) {
+            let namespace = params.get("namespace").and_then(|v| v.as_str()).unwrap_or("default");
+
+            let req = Request::new(IngestFileRequest {
+                file_path: path.to_string(),
+                namespace: namespace.to_string(),
+            });
+
+            match self.engine.ingest_file(req).await {
+                Ok(resp) => {
+                    let inner = resp.into_inner();
+                    McpResponse {
+                        jsonrpc: "2.0".to_string(),
+                        id: request.id,
+                        result: Some(serde_json::to_value(format!(
+                            "Ingested {} triples from {}",
+                            inner.edges_added, path
+                        )).unwrap()),
+                        error: None,
+                    }
+                }
+                Err(e) => self.error_response(request.id, -32000, &e.to_string()),
+            }
+        } else {
+            self.error_response(request.id, -32602, "Invalid params: 'path' required")
+        }
+    }
+
+    fn error_response(&self, id: Option<serde_json::Value>, code: i32, message: &str) -> McpResponse {
+        McpResponse {
+            jsonrpc: "2.0".to_string(),
+            id,
+            result: None,
+            error: Some(McpError {
+                code,
+                message: message.to_string(),
+                data: None,
+            }),
+        }
+    }
+
+    fn tool_result(&self, id: Option<serde_json::Value>, text: &str, is_error: bool) -> McpResponse {
+        let result = CallToolResult {
+            content: vec![Content {
+                content_type: "text".to_string(),
+                text: text.to_string(),
+            }],
+            is_error: if is_error { Some(true) } else { None },
+        };
+        McpResponse {
+            jsonrpc: "2.0".to_string(),
+            id,
+            result: Some(serde_json::to_value(result).unwrap()),
+            error: None,
+        }
+    }
+}
+
+
+========================================
+FILE: crates/semantic-engine/src/mcp_types.rs
+========================================
+
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct McpRequest {
+    pub jsonrpc: String,
+    pub id: Option<serde_json::Value>,
+    pub method: String,
+    #[serde(default)]
+    pub params: Option<serde_json::Map<String, serde_json::Value>>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct McpResponse {
+    pub jsonrpc: String,
+    pub id: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub result: Option<serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<McpError>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct McpError {
+    pub code: i32,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct Tool {
+    pub name: String,
+    pub description: Option<String>,
+    pub input_schema: serde_json::Value,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ListToolsResult {
+    pub tools: Vec<Tool>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CallToolResult {
+    pub content: Vec<Content>,
+    pub is_error: Option<bool>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct Content {
+    #[serde(rename = "type")]
+    pub content_type: String,
+    pub text: String,
+}
+
+
+
+========================================
+FILE: crates/semantic-engine/src/mcp.rs
+========================================
+
+use crate::server::MySemanticEngine;
+use serde::Deserialize;
+use std::sync::Arc;
+
+/// Request payload for the `query_knowledge_graph` tool.
+#[derive(Debug, Deserialize)]
+pub struct QueryGraphParams {
+    pub query: String,
+    pub limit: Option<u32>,
+}
+
+/// Request payload for the `add_observation` tool.
+#[derive(Debug, Deserialize)]
+pub struct AddObservationParams {
+    pub text: String,
+    pub source: Option<String>,
+}
+
+/// The MCP Server adapter.
+/// Wraps the Semantic Engine and exposes it via standard MCP tool interfaces.
+pub struct McpServer {
+    _engine: Arc<MySemanticEngine>,
+}
+
+impl McpServer {
+    pub fn new(engine: Arc<MySemanticEngine>) -> Self {
+        Self { _engine: engine }
+    }
+
+    /// Lists the tools available in this MCP server.
+    pub fn list_tools(&self) -> Vec<String> {
+        vec![
+            "query_knowledge_graph".to_string(),
+            "add_observation".to_string(),
+            "validate_hypothesis".to_string(),
+        ]
+    }
+
+    /// Handles a tool call.
+    /// In a real implementation, this would parse JSON-RPC requests.
+    pub async fn call_tool(
+        &self,
+        tool_name: &str,
+        arguments: serde_json::Value,
+    ) -> Result<serde_json::Value, String> {
+        match tool_name {
+            "query_knowledge_graph" => {
+                let params: QueryGraphParams = serde_json::from_value(arguments)
+                    .map_err(|e| format!("Invalid arguments: {}", e))?;
+                self.query_knowledge_graph(params).await
+            }
+            "add_observation" => {
+                let params: AddObservationParams = serde_json::from_value(arguments)
+                    .map_err(|e| format!("Invalid arguments: {}", e))?;
+                self.add_observation(params).await
+            }
+            _ => Err(format!("Tool not found: {}", tool_name)),
+        }
+    }
+
+    async fn query_knowledge_graph(
+        &self,
+        _params: QueryGraphParams,
+    ) -> Result<serde_json::Value, String> {
+        // Bridge to the internal engine
+        // For now, just returning a mock response
+        Ok(serde_json::json!({
+            "results": [
+                { "node_id": 1, "content": "Mock result for query", "score": 0.9 }
+            ]
+        }))
+    }
+
+    async fn add_observation(
+        &self,
+        _params: AddObservationParams,
+    ) -> Result<serde_json::Value, String> {
+        // Bridge to internal engine ingestion
+        Ok(serde_json::json!({
+            "status": "success",
+            "nodes_added": 1 // Placeholder
+        }))
+    }
+}
+
+
+========================================
+FILE: crates/semantic-engine/src/persistence.rs
+========================================
+
+use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::Path;
+
+#[derive(Serialize, Deserialize)]
+pub struct GraphSnapshot {
+    pub nodes: Vec<(u32, String)>,        // (id, name)
+    pub edges: Vec<(u32, u32, u16, u32)>, // (from, to, predicate_id, edge_id)
+    pub predicates: Vec<(u16, String)>,   // (id, name)
+    pub next_edge_id: u32,
+}
+
+impl GraphSnapshot {
+    pub fn save_to_file(&self, path: &str) -> std::io::Result<()> {
+        let data = bincode::serialize(self).map_err(std::io::Error::other)?;
+        fs::write(path, data)?;
+        println!("💾 Graph saved to {}", path);
+        Ok(())
+    }
+
+    pub fn load_from_file(path: &str) -> std::io::Result<Self> {
+        if !Path::new(path).exists() {
+            return Ok(GraphSnapshot {
+                nodes: Vec::new(),
+                edges: Vec::new(),
+                predicates: Vec::new(),
+                next_edge_id: 0,
+            });
+        }
+
+        let data = fs::read(path)?;
+        let snapshot: GraphSnapshot = bincode::deserialize(&data).map_err(std::io::Error::other)?;
+        println!("📂 Graph loaded from {}", path);
+        Ok(snapshot)
+    }
+}
+
+
+========================================
+FILE: crates/semantic-engine/src/reasoner.rs
+========================================
+
+use anyhow::Result;
+use oxigraph::model::*;
+use oxigraph::store::Store;
+use reasonable::reasoner::ReasonerBuilder;
+
+/// Reasoning strategy for knowledge graph inference
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReasoningStrategy {
+    None,
+    RDFS,
+    OWLRL,
+}
+
+/// Reasoner for deriving implicit knowledge from RDF triples
+pub struct SynapseReasoner {
+    strategy: ReasoningStrategy,
+}
+
+impl SynapseReasoner {
+    pub fn new(strategy: ReasoningStrategy) -> Self {
+        Self { strategy }
+    }
+
+    /// Apply reasoning to the store and return inferred triples
+    pub fn apply(&self, store: &Store) -> Result<Vec<(String, String, String)>> {
+        match self.strategy {
+            ReasoningStrategy::None => Ok(Vec::new()),
+            ReasoningStrategy::RDFS => self.apply_rdfs_reasoning(store),
+            ReasoningStrategy::OWLRL => self.apply_owl_reasoning(store),
+        }
+    }
+
+    fn apply_rdfs_reasoning(&self, store: &Store) -> Result<Vec<(String, String, String)>> {
+        let mut inferred = Vec::new();
+        let sub_class_of = NamedNode::new("http://www.w3.org/2000/01/rdf-schema#subClassOf")?;
+        
+        for quad in store.iter() {
+            if let Ok(q) = quad {
+                if q.predicate == sub_class_of {
+                    // q is (B subClassOf C)
+                    // Find all A such that (A subClassOf B)
+                    let subject_b = q.subject.clone();
+                    if let Subject::NamedNode(subj_node) = subject_b {
+                        for inner_quad in store.iter() {
+                            if let Ok(iq) = inner_quad {
+                                if iq.predicate == sub_class_of && iq.object == subj_node.clone().into() {
+                                    // Transitivity: A subClassOf C
+                                    inferred.push((
+                                        iq.subject.to_string(),
+                                        sub_class_of.to_string(),
+                                        q.object.to_string(),
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        
+        Ok(inferred)
+    }
+
+    fn apply_owl_reasoning(&self, store: &Store) -> Result<Vec<(String, String, String)>> {
+        let mut builder = ReasonerBuilder::new();
+        
+        // reasonable 0.3.2 with_triples_str requires &'static str.
+        // We use Box::leak here to bypass the version mismatch between oxrdf crates
+        // used by oxigraph and reasonable. This is acceptable for reasoning tasks
+        // as the strings are lived for the duration of the reasoning process.
+        let mut trips: Vec<(&'static str, &'static str, &'static str)> = Vec::new();
+        for quad in store.iter() {
+            if let Ok(q) = quad {
+                let s: &'static str = Box::leak(q.subject.to_string().into_boxed_str());
+                let p: &'static str = Box::leak(q.predicate.to_string().into_boxed_str());
+                let o: &'static str = Box::leak(q.object.to_string().into_boxed_str());
+                trips.push((s, p, o));
+            }
+        }
+        
+        builder = builder.with_triples_str(trips);
+        let mut reasoner = builder.build().map_err(|e| anyhow::anyhow!("Failed to build reasoner: {}", e))?;
+        
+        reasoner.reason();
+        Ok(reasoner.get_triples_string())
+    }
+
+    pub fn materialize(&self, store: &Store) -> Result<usize> {
+        let inferred = self.apply(store)?;
+        let mut count = 0;
+        let mut skipped = 0;
+        
+        for (s, p, o) in inferred {
+            if let (Ok(subject), Ok(predicate), Ok(object)) = (
+                NamedNode::new(&s),
+                NamedNode::new(&p),
+                NamedNode::new(&o),
+            ) {
+                // Check if triple already exists to avoid duplicates
+                let quad = Quad::new(subject.clone(), predicate.clone(), object.clone(), GraphName::DefaultGraph);
+                if store.contains(&quad)? {
+                    skipped += 1;
+                    continue;
+                }
+                // Insert new inferred triple
+                let _ = store.insert(&quad);
+                count += 1;
+            }
+        }
+        
+        if skipped > 0 {
+            eprintln!("Reasoning: {} new triples, {} duplicates skipped", count, skipped);
+        }
+        
+        Ok(count)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use oxigraph::model::NamedNode;
+
+    #[test]
+    fn test_rdfs_transitivity() -> Result<()> {
+        let store = Store::new()?;
+        let sub_class_of = "http://www.w3.org/2000/01/rdf-schema#subClassOf";
+        
+        let a = NamedNode::new("http://example.org/A")?;
+        let b = NamedNode::new("http://example.org/B")?;
+        let c = NamedNode::new("http://example.org/C")?;
+        let pred = NamedNode::new(sub_class_of)?;
+        
+        // A subClassOf B, B subClassOf C
+        store.insert(&Quad::new(a.clone(), pred.clone(), b.clone(), GraphName::DefaultGraph))?;
+        store.insert(&Quad::new(b.clone(), pred.clone(), c.clone(), GraphName::DefaultGraph))?;
+        
+        let reasoner = SynapseReasoner::new(ReasoningStrategy::RDFS);
+        let inferred = reasoner.apply(&store)?;
+        
+        // Should infer A subClassOf C
+        let mut found = false;
+        let expected_s = a.to_string();
+        let expected_o = c.to_string();
+        
+        for (s, _p, o) in inferred {
+            if s == expected_s && o == expected_o {
+                found = true;
+                break;
+            }
+        }
+        
+        assert!(found, "Inferred A subClassOf C not found");
+        Ok(())
+    }
+
+    #[test]
+    fn test_owl_reasoning_smoke() -> Result<()> {
+        let store = Store::new()?;
+        let reasoner = SynapseReasoner::new(ReasoningStrategy::OWLRL);
+        
+        let inferred = reasoner.apply(&store)?;
+        // OWL Reasoning often has default axioms, so we just check it doesn't crash
+        // and returns at least something (usually standard RDF/OWL URIs)
+        println!("OWL Reasoner inferred {} default triples", inferred.len());
+        Ok(())
+    }
+}
+
+
+========================================
+FILE: crates/semantic-engine/src/server.rs
+========================================
+
+use std::sync::Arc;
+use tonic::{Request, Response, Status};
+use dashmap::DashMap;
+
+pub mod proto {
+    tonic::include_proto!("semantic_engine");
+}
+
+use proto::semantic_engine_server::SemanticEngine;
+use proto::*;
+
+use crate::store::SynapseStore;
+use crate::reasoner::{SynapseReasoner, ReasoningStrategy as InternalStrategy};
+use crate::server::proto::{ReasoningStrategy, SearchMode};
+use crate::ingest::IngestionEngine;
+use std::path::Path;
+
+pub struct MySemanticEngine {
+    pub storage_path: String,
+    pub stores: DashMap<String, Arc<SynapseStore>>,
+}
+
+impl MySemanticEngine {
+    pub fn new(storage_path: &str) -> Self {
+        Self {
+            storage_path: storage_path.to_string(),
+            stores: DashMap::new(),
+        }
+    }
+
+    pub fn get_store(&self, namespace: &str) -> Result<Arc<SynapseStore>, Status> {
+        if let Some(store) = self.stores.get(namespace) {
+            return Ok(store.clone());
+        }
+
+        let store = SynapseStore::open(namespace, &self.storage_path)
+            .map_err(|e| Status::internal(format!("Failed to open store for namespace '{}': {}", namespace, e)))?;
+        
+        let store_arc = Arc::new(store);
+        self.stores.insert(namespace.to_string(), store_arc.clone());
+        Ok(store_arc)
+    }
+}
+
+#[tonic::async_trait]
+impl SemanticEngine for MySemanticEngine {
+    async fn ingest_triples(
+        &self,
+        request: Request<IngestRequest>,
+    ) -> Result<Response<IngestResponse>, Status> {
+        let req = request.into_inner();
+        let namespace = if req.namespace.is_empty() { "default" } else { &req.namespace };
+        let store = self.get_store(namespace)?;
+
+        let triples: Vec<(String, String, String)> = req
+            .triples
+            .into_iter()
+            .map(|t| (t.subject, t.predicate, t.object))
+            .collect();
+
+        match store.ingest_triples(triples).await {
+            Ok((added, _)) => Ok(Response::new(IngestResponse {
+                nodes_added: added,
+                edges_added: added,
+            })),
+            Err(e) => Err(Status::internal(e.to_string())),
+        }
+    }
+
+    async fn ingest_file(
+        &self,
+        request: Request<IngestFileRequest>,
+    ) -> Result<Response<IngestResponse>, Status> {
+        let req = request.into_inner();
+        let namespace = if req.namespace.is_empty() { "default" } else { &req.namespace };
+        let store = self.get_store(namespace)?;
+        
+        let engine = IngestionEngine::new(store);
+        let path = Path::new(&req.file_path);
+
+        match engine.ingest_file(path, namespace).await {
+            Ok(count) => Ok(Response::new(IngestResponse {
+                nodes_added: count,
+                edges_added: count,
+            })),
+            Err(e) => Err(Status::internal(e.to_string())),
+        }
+    }
+
+    async fn get_neighbors(
+        &self,
+        request: Request<NodeRequest>,
+    ) -> Result<Response<NeighborResponse>, Status> {
+        let req = request.into_inner();
+        let namespace = if req.namespace.is_empty() { "default" } else { &req.namespace };
+        let store = self.get_store(namespace)?;
+        
+        let direction = if req.direction.is_empty() { "outgoing" } else { &req.direction };
+        let edge_filter = if req.edge_filter.is_empty() { None } else { Some(req.edge_filter.as_str()) };
+        let max_depth = if req.depth == 0 { 1 } else { req.depth as usize };
+
+        let mut neighbors = Vec::new();
+        let mut visited = std::collections::HashSet::new();
+        let mut current_frontier = Vec::new();
+
+        // Start with the initial node
+        if let Some(start_uri) = store.get_uri(req.node_id) {
+            current_frontier.push(start_uri.clone());
+            visited.insert(start_uri);
+        }
+
+        // BFS traversal up to max_depth
+        for _depth in 0..max_depth {
+            let mut next_frontier = Vec::new();
+
+            for uri in &current_frontier {
+                // Query outgoing edges (URI as subject)
+                if direction == "outgoing" || direction == "both" {
+                    if let Ok(subj) = oxigraph::model::NamedNodeRef::new(uri) {
+                        for quad in store.store.quads_for_pattern(
+                            Some(subj.into()),
+                            None,
+                            None,
+                            None,
+                        ) {
+                            if let Ok(q) = quad {
+                                let pred = q.predicate.to_string();
+                                // Apply edge filter if specified
+                                if let Some(filter) = edge_filter {
+                                    if !pred.contains(filter) {
+                                        continue;
+                                    }
+                                }
+                                let obj_uri = q.object.to_string();
+                                if !visited.contains(&obj_uri) {
+                                    visited.insert(obj_uri.clone());
+                                    let obj_id = store.get_or_create_id(&obj_uri);
+                                    neighbors.push(Neighbor {
+                                        node_id: obj_id,
+                                        edge_type: pred,
+                                        uri: obj_uri.clone(),
+                                        direction: "outgoing".to_string(),
+                                    });
+                                    next_frontier.push(obj_uri);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Query incoming edges (URI as object)
+                if direction == "incoming" || direction == "both" {
+                    if let Ok(obj) = oxigraph::model::NamedNodeRef::new(uri) {
+                        for quad in store.store.quads_for_pattern(
+                            None,
+                            None,
+                            Some(obj.into()),
+                            None,
+                        ) {
+                            if let Ok(q) = quad {
+                                let pred = q.predicate.to_string();
+                                // Apply edge filter if specified
+                                if let Some(filter) = edge_filter {
+                                    if !pred.contains(filter) {
+                                        continue;
+                                    }
+                                }
+                                let subj_uri = q.subject.to_string();
+                                if !visited.contains(&subj_uri) {
+                                    visited.insert(subj_uri.clone());
+                                    let subj_id = store.get_or_create_id(&subj_uri);
+                                    neighbors.push(Neighbor {
+                                        node_id: subj_id,
+                                        edge_type: pred,
+                                        uri: subj_uri.clone(),
+                                        direction: "incoming".to_string(),
+                                    });
+                                    next_frontier.push(subj_uri);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            current_frontier = next_frontier;
+            if current_frontier.is_empty() {
+                break;
+            }
+        }
+
+        Ok(Response::new(NeighborResponse { neighbors }))
+    }
+
+    async fn search(
+        &self,
+        request: Request<SearchRequest>,
+    ) -> Result<Response<SearchResponse>, Status> {
+        let req = request.into_inner();
+        let namespace = if req.namespace.is_empty() { "default" } else { &req.namespace };
+        let store = self.get_store(namespace)?;
+
+        match store.hybrid_search(&req.query, req.limit as usize, 0).await {
+            Ok(results) => {
+                let grpc_results = results
+                    .into_iter()
+                    .enumerate()
+                    .map(|(idx, (uri, score))| SearchResult {
+                        node_id: idx as u32,
+                        score,
+                        content: uri.clone(),
+                        uri,
+                    })
+                    .collect();
+                Ok(Response::new(SearchResponse { results: grpc_results }))
+            }
+            Err(e) => Err(Status::internal(e.to_string())),
+        }
+    }
+
+    async fn resolve_id(
+        &self,
+        request: Request<ResolveRequest>,
+    ) -> Result<Response<ResolveResponse>, Status> {
+        let req = request.into_inner();
+        let namespace = if req.namespace.is_empty() { "default" } else { &req.namespace };
+        let store = self.get_store(namespace)?;
+
+        // Look up the URI in our mapping
+        let uri_to_id = store.uri_to_id.read().unwrap();
+        if let Some(&node_id) = uri_to_id.get(&req.content) {
+            Ok(Response::new(ResolveResponse {
+                node_id,
+                found: true,
+            }))
+        } else {
+            Ok(Response::new(ResolveResponse {
+                node_id: 0,
+                found: false,
+            }))
+        }
+    }
+
+    async fn get_all_triples(
+        &self,
+        request: Request<EmptyRequest>,
+    ) -> Result<Response<TriplesResponse>, Status> {
+        let req = request.into_inner();
+        let namespace = if req.namespace.is_empty() { "default" } else { &req.namespace };
+        let store = self.get_store(namespace)?;
+        
+        let mut triples = Vec::new();
+
+        for quad in store.store.iter().map(|q| q.unwrap()) {
+            triples.push(Triple {
+                subject: quad.subject.to_string(),
+                predicate: quad.predicate.to_string(),
+                object: quad.object.to_string(),
+                provenance: Some(Provenance {
+                    source: "oxigraph".to_string(),
+                    timestamp: "".to_string(),
+                    method: "storage".to_string(),
+                }),
+                embedding: vec![],
+            });
+        }
+
+        Ok(Response::new(TriplesResponse { triples }))
+    }
+
+    async fn query_sparql(
+        &self,
+        request: Request<SparqlRequest>,
+    ) -> Result<Response<SparqlResponse>, Status> {
+        let req = request.into_inner();
+        let namespace = if req.namespace.is_empty() { "default" } else { &req.namespace };
+        let store = self.get_store(namespace)?;
+        
+        match store.query_sparql(&req.query) {
+            Ok(json) => Ok(Response::new(SparqlResponse { results_json: json })),
+            Err(e) => Err(Status::internal(e.to_string())),
+        }
+    }
+
+    async fn delete_namespace_data(
+        &self,
+        request: Request<EmptyRequest>,
+    ) -> Result<Response<DeleteResponse>, Status> {
+        let req = request.into_inner();
+        let namespace = if req.namespace.is_empty() { "default" } else { &req.namespace };
+        
+        // Remove from cache
+        self.stores.remove(namespace);
+        
+        // Delete directory
+        let path = Path::new(&self.storage_path).join(namespace);
+        if path.exists() {
+            std::fs::remove_dir_all(path).map_err(|e| Status::internal(e.to_string()))?;
+        }
+
+        Ok(Response::new(DeleteResponse {
+            success: true,
+            message: format!("Deleted namespace '{}'", namespace),
+        }))
+    }
+
+    async fn hybrid_search(
+        &self,
+        request: Request<HybridSearchRequest>,
+    ) -> Result<Response<SearchResponse>, Status> {
+        let req = request.into_inner();
+        let namespace = if req.namespace.is_empty() { "default" } else { &req.namespace };
+        let store = self.get_store(namespace)?;
+
+        let vector_k = req.vector_k as usize;
+        let graph_depth = req.graph_depth;
+
+        let results = match SearchMode::try_from(req.mode) {
+            Ok(SearchMode::VectorOnly) | Ok(SearchMode::Hybrid) => {
+                store.hybrid_search(&req.query, vector_k, graph_depth).await
+                    .map_err(|e| Status::internal(format!("Hybrid search failed: {}", e)))?
+            }
+            _ => vec![],
+        };
+
+        let grpc_results = results
+            .into_iter()
+            .enumerate()
+            .map(|(idx, (uri, score))| SearchResult {
+                node_id: idx as u32,
+                score,
+                content: uri.clone(),
+                uri,
+            })
+            .collect();
+
+        Ok(Response::new(SearchResponse { results: grpc_results }))
+    }
+
+    async fn apply_reasoning(
+        &self,
+        request: Request<ReasoningRequest>,
+    ) -> Result<Response<ReasoningResponse>, Status> {
+        let req = request.into_inner();
+        let namespace = if req.namespace.is_empty() { "default" } else { &req.namespace };
+        let store = self.get_store(namespace)?;
+        
+        let strategy = match ReasoningStrategy::try_from(req.strategy) {
+            Ok(ReasoningStrategy::Rdfs) => InternalStrategy::RDFS,
+            Ok(ReasoningStrategy::Owlrl) => InternalStrategy::OWLRL,
+            _ => InternalStrategy::None,
+        };
+
+        let reasoner = SynapseReasoner::new(strategy);
+        
+        if req.materialize {
+            match reasoner.materialize(&store.store) {
+                Ok(count) => Ok(Response::new(ReasoningResponse {
+                    success: true,
+                    triples_inferred: count as u32,
+                    message: format!("Materialized {} triples in namespace '{}'", count, namespace),
+                })),
+                Err(e) => Err(Status::internal(e.to_string())),
+            }
+        } else {
+            match reasoner.apply(&store.store) {
+                Ok(triples) => Ok(Response::new(ReasoningResponse {
+                    success: true,
+                    triples_inferred: triples.len() as u32,
+                    message: format!("Found {} inferred triples in namespace '{}'", triples.len(), namespace),
+                })),
+                Err(e) => Err(Status::internal(e.to_string())),
+            }
+        }
+    }
+}
+
+pub async fn run_mcp_stdio(engine: Arc<MySemanticEngine>) -> Result<(), Box<dyn std::error::Error>> {
+    let server = crate::mcp_stdio::McpStdioServer::new(engine);
+    server.run().await
+}
+
+
+========================================
+FILE: crates/semantic-engine/src/store.rs
+========================================
+
+use anyhow::Result;
+use oxigraph::model::*;
+use oxigraph::store::Store;
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::{Arc, RwLock};
+use crate::vector_store::VectorStore;
+use serde::{Deserialize, Serialize};
+
+/// Persisted URI mappings
+#[derive(Serialize, Deserialize, Default)]
+struct UriMappings {
+    uri_to_id: HashMap<String, u32>,
+    next_id: u32,
+}
+
+pub struct SynapseStore {
+    pub store: Store,
+    pub namespace: String,
+    pub storage_path: PathBuf,
+    // Mapping for gRPC compatibility (ID <-> URI)
+    pub id_to_uri: RwLock<HashMap<u32, String>>,
+    pub uri_to_id: RwLock<HashMap<String, u32>>,
+    pub next_id: std::sync::atomic::AtomicU32,
+    // Vector store for hybrid search
+    pub vector_store: Option<Arc<VectorStore>>,
+}
+
+impl SynapseStore {
+    pub fn open(namespace: &str, storage_path: &str) -> Result<Self> {
+        let path = PathBuf::from(storage_path).join(namespace);
+        std::fs::create_dir_all(&path)?;
+        let store = Store::open(&path)?;
+        
+        // Load persisted URI mappings if they exist
+        let mappings_path = path.join("uri_mappings.json");
+        let (uri_to_id, id_to_uri, next_id) = if mappings_path.exists() {
+            let content = std::fs::read_to_string(&mappings_path)?;
+            let mappings: UriMappings = serde_json::from_str(&content)?;
+            let id_to_uri: HashMap<u32, String> = mappings.uri_to_id
+                .iter()
+                .map(|(uri, &id)| (id, uri.clone()))
+                .collect();
+            (mappings.uri_to_id, id_to_uri, mappings.next_id)
+        } else {
+            (HashMap::new(), HashMap::new(), 1)
+        };
+        
+        // Initialize vector store (optional, can fail gracefully)
+        let vector_store = VectorStore::new(namespace)
+            .ok()
+            .map(Arc::new);
+        
+        Ok(Self {
+            store,
+            namespace: namespace.to_string(),
+            storage_path: path,
+            id_to_uri: RwLock::new(id_to_uri),
+            uri_to_id: RwLock::new(uri_to_id),
+            next_id: std::sync::atomic::AtomicU32::new(next_id),
+            vector_store,
+        })
+    }
+
+    /// Save URI mappings to disk
+    fn save_mappings(&self) -> Result<()> {
+        let uri_map = self.uri_to_id.read().unwrap();
+        let mappings = UriMappings {
+            uri_to_id: uri_map.clone(),
+            next_id: self.next_id.load(std::sync::atomic::Ordering::Relaxed),
+        };
+        let content = serde_json::to_string_pretty(&mappings)?;
+        std::fs::write(self.storage_path.join("uri_mappings.json"), content)?;
+        Ok(())
+    }
+
+    pub fn get_or_create_id(&self, uri: &str) -> u32 {
+        {
+            let map = self.uri_to_id.read().unwrap();
+            if let Some(&id) = map.get(uri) {
+                return id;
+            }
+        }
+        
+        let mut uri_map = self.uri_to_id.write().unwrap();
+        let mut id_map = self.id_to_uri.write().unwrap();
+        
+        if let Some(&id) = uri_map.get(uri) {
+            return id;
+        }
+        
+        let id = self.next_id.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        uri_map.insert(uri.to_string(), id);
+        id_map.insert(id, uri.to_string());
+        
+        // Persist mappings (best effort, don't block on error)
+        drop(uri_map);
+        drop(id_map);
+        let _ = self.save_mappings();
+        
+        id
+    }
+
+    pub fn get_uri(&self, id: u32) -> Option<String> {
+        self.id_to_uri.read().unwrap().get(&id).cloned()
+    }
+
+    pub async fn ingest_triples(&self, triples: Vec<(String, String, String)>) -> Result<(u32, u32)> {
+        let mut added = 0;
+        
+        for (s, p, o) in triples {
+            let subject_uri = self.ensure_uri(&s);
+            let predicate_uri = self.ensure_uri(&p);
+            let object_uri = self.ensure_uri(&o);
+            
+            let subject = Subject::NamedNode(NamedNode::new_unchecked(&subject_uri));
+            let predicate = NamedNode::new_unchecked(&predicate_uri);
+            let object = Term::NamedNode(NamedNode::new_unchecked(&object_uri));
+            
+            let quad = Quad::new(subject, predicate, object, GraphName::DefaultGraph);
+            if self.store.insert(&quad)? {
+                added += 1;
+                
+                // Also index in vector store if available
+                if let Some(ref vs) = self.vector_store {
+                    // Create searchable content from triple
+                    let content = format!("{} {} {}", s, p, o);
+                    let _ = vs.add(&subject_uri, &content).await;
+                }
+            }
+        }
+
+        Ok((added, 0))
+    }
+
+    /// Hybrid search: vector similarity + graph expansion
+    pub async fn hybrid_search(
+        &self,
+        query: &str,
+        vector_k: usize,
+        graph_depth: u32,
+    ) -> Result<Vec<(String, f32)>> {
+        let mut results = Vec::new();
+        
+        // Step 1: Vector search
+        if let Some(ref vs) = self.vector_store {
+            let vector_results = vs.search(query, vector_k).await?;
+            
+            for result in vector_results {
+                results.push((result.uri.clone(), result.score));
+                
+                // Step 2: Graph expansion (if depth > 0)
+                if graph_depth > 0 {
+                    let expanded = self.expand_graph(&result.uri, graph_depth)?;
+                    for uri in expanded {
+                        // Add with slightly lower score
+                        results.push((uri, result.score * 0.8));
+                    }
+                }
+            }
+        }
+        
+        // Remove duplicates and sort by score
+        results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
+        results.dedup_by(|a, b| a.0 == b.0);
+        
+        Ok(results)
+    }
+
+    /// Expand graph from a starting URI
+    fn expand_graph(&self, start_uri: &str, depth: u32) -> Result<Vec<String>> {
+        let mut expanded = Vec::new();
+        
+        if depth == 0 {
+            return Ok(expanded);
+        }
+        
+        // Query for all triples where start_uri is subject or object
+        let subject = NamedNodeRef::new(start_uri).ok();
+        
+        if let Some(subj) = subject {
+            for quad in self.store.quads_for_pattern(
+                Some(subj.into()),
+                None,
+                None,
+                None,
+            ) {
+                if let Ok(q) = quad {
+                    expanded.push(q.object.to_string());
+                    
+                    // Recursive expansion (simplified, depth-1)
+                    if depth > 1 {
+                        let nested = self.expand_graph(&q.object.to_string(), depth - 1)?;
+                        expanded.extend(nested);
+                    }
+                }
+            }
+        }
+        
+        Ok(expanded)
+    }
+
+    pub fn query_sparql(&self, query: &str) -> Result<String> {
+        use oxigraph::sparql::QueryResults;
+        
+        let results = self.store.query(query)?;
+        
+        match results {
+            QueryResults::Solutions(solutions) => {
+                let mut results_array = Vec::new();
+                for solution in solutions {
+                    let sol = solution?;
+                    let mut mapping = serde_json::Map::new();
+                    for (variable, value) in sol.iter() {
+                        mapping.insert(variable.to_string(), serde_json::to_value(value.to_string()).unwrap());
+                    }
+                    results_array.push(serde_json::Value::Object(mapping));
+                }
+                Ok(serde_json::to_string(&results_array)?)
+            }
+            _ => Ok("[]".to_string()),
+        }
+    }
+
+    fn ensure_uri(&self, s: &str) -> String {
+        if s.starts_with("http") {
+            s.to_string()
+        } else {
+            format!("http://synapse.os/{}", s)
+        }
+    }
+}
+
+
+========================================
+FILE: crates/semantic-engine/src/vector_store.rs
+========================================
+
+use anyhow::Result;
+use hnsw::Hnsw;
+use reqwest::Client;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
+use std::path::PathBuf;
+use rand_pcg::Pcg64;
+
+const HUGGINGFACE_API_URL: &str = "https://router.huggingface.co/hf-inference/models";
+const DEFAULT_MODEL: &str = "sentence-transformers/all-MiniLM-L6-v2"; // 384 dims, fast
+
+/// Euclidean distance metric for HNSW
+#[derive(Default, Clone)]
+pub struct Euclidian;
+
+impl space::Metric<[f32; 384]> for Euclidian {
+    type Unit = u64;
+    fn distance(&self, a: &[f32; 384], b: &[f32; 384]) -> u64 {
+        let mut dist_sq = 0.0;
+        for i in 0..384 {
+            let diff = a[i] - b[i];
+            dist_sq += diff * diff;
+        }
+        // Floating point to bits for ordered comparison as per space v0.17 recommendations
+        dist_sq.sqrt().to_bits() as u64
+    }
+}
+
+/// Persisted vector data
+#[derive(Serialize, Deserialize, Default)]
+struct VectorData {
+    entries: Vec<VectorEntry>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct VectorEntry {
+    uri: String,
+    embedding: Vec<f32>,
+}
+
+/// Vector store using HuggingFace Inference API for embeddings
+pub struct VectorStore {
+    /// HNSW index for fast approximate nearest neighbor search
+    index: Arc<RwLock<Hnsw<Euclidian, [f32; 384], Pcg64, 16, 32>>>,
+    /// Mapping from node ID to URI
+    id_to_uri: Arc<RwLock<HashMap<usize, String>>>,
+    /// Mapping from URI to node ID
+    uri_to_id: Arc<RwLock<HashMap<String, usize>>>,
+    /// Storage path for persistence
+    storage_path: Option<PathBuf>,
+    /// HTTP client for HuggingFace API
+    client: Client,
+    /// HuggingFace API token (optional, for rate limits)
+    api_token: Option<String>,
+    /// Model name
+    model: String,
+    /// Stored embeddings for persistence
+    embeddings: Arc<RwLock<Vec<VectorEntry>>>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SearchResult {
+    pub uri: String,
+    pub score: f32,
+    pub content: String,
+}
+
+#[derive(Serialize)]
+struct EmbeddingRequest {
+    inputs: String,
+}
+
+impl VectorStore {
+    /// Create a new vector store for a namespace
+    pub fn new(namespace: &str) -> Result<Self> {
+        // Try to get storage path from environment
+        let storage_path = std::env::var("GRAPH_STORAGE_PATH")
+            .ok()
+            .map(|p| PathBuf::from(p).join(namespace));
+        
+        // Create HNSW index with Euclidian metric
+        let mut index = Hnsw::new(Euclidian);
+        let mut id_to_uri = HashMap::new();
+        let mut uri_to_id = HashMap::new();
+        let mut embeddings = Vec::new();
+
+        // Try to load persisted vectors
+        if let Some(ref path) = storage_path {
+            let vectors_path = path.join("vectors.json");
+            if vectors_path.exists() {
+                if let Ok(content) = std::fs::read_to_string(&vectors_path) {
+                    if let Ok(data) = serde_json::from_str::<VectorData>(&content) {
+                        let mut searcher = hnsw::Searcher::default();
+                        for entry in data.entries {
+                            if entry.embedding.len() == 384 {
+                                let mut emb = [0.0f32; 384];
+                                emb.copy_from_slice(&entry.embedding);
+                                let id = index.insert(emb, &mut searcher);
+                                id_to_uri.insert(id, entry.uri.clone());
+                                uri_to_id.insert(entry.uri.clone(), id);
+                                embeddings.push(entry);
+                            }
+                        }
+                        eprintln!("Loaded {} vectors from disk", embeddings.len());
+                    }
+                }
+            }
+        }
+
+        // Get API token from environment (optional)
+        let api_token = std::env::var("HUGGINGFACE_API_TOKEN").ok();
+
+        Ok(Self {
+            index: Arc::new(RwLock::new(index)),
+            id_to_uri: Arc::new(RwLock::new(id_to_uri)),
+            uri_to_id: Arc::new(RwLock::new(uri_to_id)),
+            storage_path,
+            client: Client::new(),
+            api_token,
+            model: DEFAULT_MODEL.to_string(),
+            embeddings: Arc::new(RwLock::new(embeddings)),
+        })
+    }
+
+    /// Save vectors to disk
+    fn save_vectors(&self) -> Result<()> {
+        if let Some(ref path) = self.storage_path {
+            std::fs::create_dir_all(path)?;
+            let data = VectorData {
+                entries: self.embeddings.read().unwrap().clone(),
+            };
+            let content = serde_json::to_string(&data)?;
+            std::fs::write(path.join("vectors.json"), content)?;
+        }
+        Ok(())
+    }
+
+    /// Generate embedding for a text using HuggingFace Inference API
+    pub async fn embed(&self, text: &str) -> Result<[f32; 384]> {
+        let url = format!("{}/{}/pipeline/feature-extraction", HUGGINGFACE_API_URL, self.model);
+        
+        let mut request = self.client
+            .post(&url)
+            .json(&EmbeddingRequest {
+                inputs: text.to_string(),
+            });
+
+        // Add auth token if available
+        if let Some(ref token) = self.api_token {
+            request = request.header("Authorization", format!("Bearer {}", token));
+        }
+
+        let response = request.send().await?;
+        
+        if !response.status().is_success() {
+            let error_text = response.text().await?;
+            anyhow::bail!("HuggingFace API error: {}", error_text);
+        }
+
+        // Response is a Vec<f32> directly
+        let embedding_vec: Vec<f32> = response.json().await?;
+        
+        if embedding_vec.len() != 384 {
+            anyhow::bail!("Expected 384 dimensions, got {}", embedding_vec.len());
+        }
+
+        let mut embedding = [0.0f32; 384];
+        embedding.copy_from_slice(&embedding_vec[0..384]);
+        
+        Ok(embedding)
+    }
+
+    /// Add a URI with its text content to the index
+    pub async fn add(&self, uri: &str, content: &str) -> Result<usize> {
+        // Check if URI already exists
+        {
+            let uri_map = self.uri_to_id.read().unwrap();
+            if let Some(&id) = uri_map.get(uri) {
+                return Ok(id);
+            }
+        }
+
+        // Generate embedding via HuggingFace API
+        let embedding = self.embed(content).await?;
+        
+        // Add to HNSW index
+        let mut searcher = hnsw::Searcher::default();
+        let id = {
+            let mut index = self.index.write().unwrap();
+            index.insert(embedding, &mut searcher)
+        };
+
+        // Update mappings
+        {
+            let mut uri_map = self.uri_to_id.write().unwrap();
+            let mut id_map = self.id_to_uri.write().unwrap();
+            uri_map.insert(uri.to_string(), id);
+            id_map.insert(id, uri.to_string());
+        }
+
+        // Persist embedding for recovery
+        {
+            let mut embs = self.embeddings.write().unwrap();
+            embs.push(VectorEntry {
+                uri: uri.to_string(),
+                embedding: embedding.to_vec(),
+            });
+        }
+        let _ = self.save_vectors(); // Best effort persistence
+
+        Ok(id)
+    }
+
+    /// Search for similar vectors
+    pub async fn search(&self, query: &str, k: usize) -> Result<Vec<SearchResult>> {
+        // Generate query embedding via HuggingFace API
+        let query_embedding = self.embed(query).await?;
+
+        // Search HNSW index
+        let mut searcher = hnsw::Searcher::default();
+        let mut neighbors = vec![space::Neighbor { index: 0, distance: !0 }; k];
+        
+        let found_neighbors = {
+            let index = self.index.read().unwrap();
+            index.nearest(&query_embedding, 50, &mut searcher, &mut neighbors)
+        };
+
+        // Convert to results
+        let id_map = self.id_to_uri.read().unwrap();
+        let results: Vec<SearchResult> = found_neighbors
+            .iter()
+            .filter_map(|neighbor| {
+                id_map.get(&neighbor.index).map(|uri| {
+                    // Convert back from bits to f32
+                    let score_f32 = f32::from_bits(neighbor.distance as u32);
+                    SearchResult {
+                        uri: uri.clone(),
+                        score: 1.0 / (1.0 + score_f32), 
+                        content: uri.clone(), 
+                    }
+                })
+            })
+            .collect();
+
+        Ok(results)
+    }
+
+    pub fn get_uri(&self, id: usize) -> Option<String> {
+        self.id_to_uri.read().unwrap().get(&id).cloned()
+    }
+
+    pub fn get_id(&self, uri: &str) -> Option<usize> {
+        self.uri_to_id.read().unwrap().get(uri).copied()
+    }
+
+    pub fn len(&self) -> usize {
+        self.uri_to_id.read().unwrap().len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+
+========================================
+FILE: crates/semantic-engine/proto/semantic_engine.proto
+========================================
+
+syntax = "proto3";
+package semantic_engine;
+
+service SemanticEngine {
+    // Ingests a batch of triples
+    rpc IngestTriples (IngestRequest) returns (IngestResponse);
+    
+    // Ingests a file (CSV, Markdown)
+    rpc IngestFile (IngestFileRequest) returns (IngestResponse);
+    
+    // Queries the graph (Basic traversal for now)
+    rpc GetNeighbors (NodeRequest) returns (NeighborResponse);
+    
+    // Vector Search (Placeholder for hybrid query)
+    rpc Search (SearchRequest) returns (SearchResponse);
+
+    // Resolves a string URI to a Node ID
+    rpc ResolveId (ResolveRequest) returns (ResolveResponse);
+    
+    // Get all stored triples (for graph visualization)
+    rpc GetAllTriples (EmptyRequest) returns (TriplesResponse);
+
+    // Executes a SPARQL query
+    rpc QuerySparql (SparqlRequest) returns (SparqlResponse);
+
+    // Deletes all data associated with a namespace
+    rpc DeleteNamespaceData (EmptyRequest) returns (DeleteResponse);
+
+    // Hybrid search combining vector similarity and graph traversal
+    rpc HybridSearch (HybridSearchRequest) returns (SearchResponse);
+
+    // Applies automated reasoning to a namespace
+    rpc ApplyReasoning (ReasoningRequest) returns (ReasoningResponse);
+}
+
+message SparqlRequest {
+    string query = 1;
+    string namespace = 2;
+}
+
+message SparqlResponse {
+    string results_json = 1;
+}
+
+message DeleteResponse {
+    bool success = 1;
+    string message = 2;
+}
+
+message Provenance {
+    string source = 1;
+    string timestamp = 2;
+    string method = 3;
+}
+
+message Triple {
+    string subject = 1;
+    string predicate = 2;
+    string object = 3;
+    Provenance provenance = 4;
+    repeated float embedding = 5;  // Vector embedding for hybrid search
+}
+
+message IngestRequest {
+    repeated Triple triples = 1;
+    string namespace = 2;
+}
+
+message IngestFileRequest {
+    string file_path = 1;
+    string namespace = 2;
+}
+
+message IngestResponse {
+    uint32 nodes_added = 1;
+    uint32 edges_added = 2;
+}
+
+message NodeRequest {
+    uint32 node_id = 1;
+    string namespace = 2;
+    string direction = 3;    // "outgoing", "incoming", or "both" (default: "outgoing")
+    uint32 depth = 4;        // Traversal depth (default: 1)
+    string edge_filter = 5;  // Optional: filter by edge type (predicate)
+}
+
+message NeighborResponse {
+    repeated Neighbor neighbors = 1;
+}
+
+message Neighbor {
+    uint32 node_id = 1;
+    string edge_type = 2;
+    string uri = 3;           // Full URI of the neighbor
+    string direction = 4;     // "outgoing" or "incoming"
+}
+
+message SearchRequest {
+    string query = 1;
+    uint32 limit = 2;
+    string namespace = 3;
+}
+
+message SearchResponse {
+    repeated SearchResult results = 1;
+}
+
+message SearchResult {
+    uint32 node_id = 1;
+    float score = 2;
+    string content = 3;
+    string uri = 4;  // Full URI of the entity
+}
+
+enum SearchMode {
+    VECTOR_ONLY = 0;
+    GRAPH_ONLY = 1;
+    HYBRID = 2;
+}
+
+message HybridSearchRequest {
+    string query = 1;
+    string namespace = 2;
+    uint32 vector_k = 3;      // Top-K from vector search
+    uint32 graph_depth = 4;   // Graph expansion depth (0 = no expansion)
+    SearchMode mode = 5;      // Search strategy
+    uint32 limit = 6;         // Final result limit
+}
+
+message ResolveRequest {
+    string content = 1;
+    string namespace = 2;
+}
+
+message ResolveResponse {
+    uint32 node_id = 1;
+    bool found = 2;
+}
+
+message EmptyRequest {
+    string namespace = 1;
+}
+
+message TriplesResponse {
+    repeated Triple triples = 1;
+}
+
+message ReasoningRequest {
+    string namespace = 1;
+    ReasoningStrategy strategy = 2;
+    bool materialize = 3;  // Whether to save inferred triples to the store
+}
+
+enum ReasoningStrategy {
+    NONE = 0;
+    RDFS = 1;
+    OWLRL = 2;
+}
+
+message ReasoningResponse {
+    bool success = 1;
+    uint32 triples_inferred = 2;
+    string message = 3;
+}
+

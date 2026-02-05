@@ -28,7 +28,7 @@ impl MySemanticEngine {
         }
     }
 
-    fn get_store(&self, namespace: &str) -> Result<Arc<SynapseStore>, Status> {
+    pub fn get_store(&self, namespace: &str) -> Result<Arc<SynapseStore>, Status> {
         if let Some(store) = self.stores.get(namespace) {
             return Ok(store.clone());
         }
@@ -89,9 +89,107 @@ impl SemanticEngine for MySemanticEngine {
 
     async fn get_neighbors(
         &self,
-        _request: Request<NodeRequest>,
+        request: Request<NodeRequest>,
     ) -> Result<Response<NeighborResponse>, Status> {
-        Ok(Response::new(NeighborResponse { neighbors: vec![] }))
+        let req = request.into_inner();
+        let namespace = if req.namespace.is_empty() { "default" } else { &req.namespace };
+        let store = self.get_store(namespace)?;
+        
+        let direction = if req.direction.is_empty() { "outgoing" } else { &req.direction };
+        let edge_filter = if req.edge_filter.is_empty() { None } else { Some(req.edge_filter.as_str()) };
+        let max_depth = if req.depth == 0 { 1 } else { req.depth as usize };
+
+        let mut neighbors = Vec::new();
+        let mut visited = std::collections::HashSet::new();
+        let mut current_frontier = Vec::new();
+
+        // Start with the initial node
+        if let Some(start_uri) = store.get_uri(req.node_id) {
+            current_frontier.push(start_uri.clone());
+            visited.insert(start_uri);
+        }
+
+        // BFS traversal up to max_depth
+        for _depth in 0..max_depth {
+            let mut next_frontier = Vec::new();
+
+            for uri in &current_frontier {
+                // Query outgoing edges (URI as subject)
+                if direction == "outgoing" || direction == "both" {
+                    if let Ok(subj) = oxigraph::model::NamedNodeRef::new(uri) {
+                        for quad in store.store.quads_for_pattern(
+                            Some(subj.into()),
+                            None,
+                            None,
+                            None,
+                        ) {
+                            if let Ok(q) = quad {
+                                let pred = q.predicate.to_string();
+                                // Apply edge filter if specified
+                                if let Some(filter) = edge_filter {
+                                    if !pred.contains(filter) {
+                                        continue;
+                                    }
+                                }
+                                let obj_uri = q.object.to_string();
+                                if !visited.contains(&obj_uri) {
+                                    visited.insert(obj_uri.clone());
+                                    let obj_id = store.get_or_create_id(&obj_uri);
+                                    neighbors.push(Neighbor {
+                                        node_id: obj_id,
+                                        edge_type: pred,
+                                        uri: obj_uri.clone(),
+                                        direction: "outgoing".to_string(),
+                                    });
+                                    next_frontier.push(obj_uri);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Query incoming edges (URI as object)
+                if direction == "incoming" || direction == "both" {
+                    if let Ok(obj) = oxigraph::model::NamedNodeRef::new(uri) {
+                        for quad in store.store.quads_for_pattern(
+                            None,
+                            None,
+                            Some(obj.into()),
+                            None,
+                        ) {
+                            if let Ok(q) = quad {
+                                let pred = q.predicate.to_string();
+                                // Apply edge filter if specified
+                                if let Some(filter) = edge_filter {
+                                    if !pred.contains(filter) {
+                                        continue;
+                                    }
+                                }
+                                let subj_uri = q.subject.to_string();
+                                if !visited.contains(&subj_uri) {
+                                    visited.insert(subj_uri.clone());
+                                    let subj_id = store.get_or_create_id(&subj_uri);
+                                    neighbors.push(Neighbor {
+                                        node_id: subj_id,
+                                        edge_type: pred,
+                                        uri: subj_uri.clone(),
+                                        direction: "incoming".to_string(),
+                                    });
+                                    next_frontier.push(subj_uri);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            current_frontier = next_frontier;
+            if current_frontier.is_empty() {
+                break;
+            }
+        }
+
+        Ok(Response::new(NeighborResponse { neighbors }))
     }
 
     async fn search(
@@ -122,12 +220,25 @@ impl SemanticEngine for MySemanticEngine {
 
     async fn resolve_id(
         &self,
-        _request: Request<ResolveRequest>,
+        request: Request<ResolveRequest>,
     ) -> Result<Response<ResolveResponse>, Status> {
-        Ok(Response::new(ResolveResponse {
-            node_id: 0,
-            found: false,
-        }))
+        let req = request.into_inner();
+        let namespace = if req.namespace.is_empty() { "default" } else { &req.namespace };
+        let store = self.get_store(namespace)?;
+
+        // Look up the URI in our mapping
+        let uri_to_id = store.uri_to_id.read().unwrap();
+        if let Some(&node_id) = uri_to_id.get(&req.content) {
+            Ok(Response::new(ResolveResponse {
+                node_id,
+                found: true,
+            }))
+        } else {
+            Ok(Response::new(ResolveResponse {
+                node_id: 0,
+                found: false,
+            }))
+        }
     }
 
     async fn get_all_triples(

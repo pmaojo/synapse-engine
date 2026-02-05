@@ -1,5 +1,4 @@
 use anyhow::Result;
-use std::collections::HashMap;
 
 pub struct ExtractionResult {
     pub triples: Vec<(String, String, String)>,

@@ -4,6 +4,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
+use std::path::PathBuf;
 use rand_pcg::Pcg64;
 
 const HUGGINGFACE_API_URL: &str = "https://router.huggingface.co/hf-inference/models";
@@ -26,6 +27,18 @@ impl space::Metric<[f32; 384]> for Euclidian {
     }
 }
 
+/// Persisted vector data
+#[derive(Serialize, Deserialize, Default)]
+struct VectorData {
+    entries: Vec<VectorEntry>,
+}
+
+#[derive(Serialize, Deserialize, Clone)]
+struct VectorEntry {
+    uri: String,
+    embedding: Vec<f32>,
+}
+
 /// Vector store using HuggingFace Inference API for embeddings
 pub struct VectorStore {
     /// HNSW index for fast approximate nearest neighbor search
@@ -34,12 +47,16 @@ pub struct VectorStore {
     id_to_uri: Arc<RwLock<HashMap<usize, String>>>,
     /// Mapping from URI to node ID
     uri_to_id: Arc<RwLock<HashMap<String, usize>>>,
+    /// Storage path for persistence
+    storage_path: Option<PathBuf>,
     /// HTTP client for HuggingFace API
     client: Client,
     /// HuggingFace API token (optional, for rate limits)
     api_token: Option<String>,
     /// Model name
     model: String,
+    /// Stored embeddings for persistence
+    embeddings: Arc<RwLock<Vec<VectorEntry>>>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -56,21 +73,67 @@ struct EmbeddingRequest {
 
 impl VectorStore {
     /// Create a new vector store for a namespace
-    pub fn new(_namespace: &str) -> Result<Self> {
+    pub fn new(namespace: &str) -> Result<Self> {
+        // Try to get storage path from environment
+        let storage_path = std::env::var("GRAPH_STORAGE_PATH")
+            .ok()
+            .map(|p| PathBuf::from(p).join(namespace));
+        
         // Create HNSW index with Euclidian metric
-        let index = Hnsw::new(Euclidian);
+        let mut index = Hnsw::new(Euclidian);
+        let mut id_to_uri = HashMap::new();
+        let mut uri_to_id = HashMap::new();
+        let mut embeddings = Vec::new();
+
+        // Try to load persisted vectors
+        if let Some(ref path) = storage_path {
+            let vectors_path = path.join("vectors.json");
+            if vectors_path.exists() {
+                if let Ok(content) = std::fs::read_to_string(&vectors_path) {
+                    if let Ok(data) = serde_json::from_str::<VectorData>(&content) {
+                        let mut searcher = hnsw::Searcher::default();
+                        for entry in data.entries {
+                            if entry.embedding.len() == 384 {
+                                let mut emb = [0.0f32; 384];
+                                emb.copy_from_slice(&entry.embedding);
+                                let id = index.insert(emb, &mut searcher);
+                                id_to_uri.insert(id, entry.uri.clone());
+                                uri_to_id.insert(entry.uri.clone(), id);
+                                embeddings.push(entry);
+                            }
+                        }
+                        eprintln!("Loaded {} vectors from disk", embeddings.len());
+                    }
+                }
+            }
+        }
 
         // Get API token from environment (optional)
         let api_token = std::env::var("HUGGINGFACE_API_TOKEN").ok();
 
         Ok(Self {
             index: Arc::new(RwLock::new(index)),
-            id_to_uri: Arc::new(RwLock::new(HashMap::new())),
-            uri_to_id: Arc::new(RwLock::new(HashMap::new())),
+            id_to_uri: Arc::new(RwLock::new(id_to_uri)),
+            uri_to_id: Arc::new(RwLock::new(uri_to_id)),
+            storage_path,
             client: Client::new(),
             api_token,
             model: DEFAULT_MODEL.to_string(),
+            embeddings: Arc::new(RwLock::new(embeddings)),
         })
+    }
+
+    /// Save vectors to disk
+    fn save_vectors(&self) -> Result<()> {
+        if let Some(ref path) = self.storage_path {
+            std::fs::create_dir_all(path)?;
+            let data = VectorData {
+                entries: self.embeddings.read().unwrap().clone(),
+            };
+            let content = serde_json::to_string(&data)?;
+            std::fs::write(path.join("vectors.json"), content)?;
+        }
+        Ok(())
     }
 
     /// Generate embedding for a text using HuggingFace Inference API
@@ -135,6 +198,16 @@ impl VectorStore {
             uri_map.insert(uri.to_string(), id);
             id_map.insert(id, uri.to_string());
         }
+
+        // Persist embedding for recovery
+        {
+            let mut embs = self.embeddings.write().unwrap();
+            embs.push(VectorEntry {
+                uri: uri.to_string(),
+                embedding: embedding.to_vec(),
+            });
+        }
+        let _ = self.save_vectors(); // Best effort persistence
 
         Ok(id)
     }

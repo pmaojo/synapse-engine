@@ -5,10 +5,19 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
 use crate::vector_store::VectorStore;
+use serde::{Deserialize, Serialize};
+
+/// Persisted URI mappings
+#[derive(Serialize, Deserialize, Default)]
+struct UriMappings {
+    uri_to_id: HashMap<String, u32>,
+    next_id: u32,
+}
 
 pub struct SynapseStore {
     pub store: Store,
     pub namespace: String,
+    pub storage_path: PathBuf,
     // Mapping for gRPC compatibility (ID <-> URI)
     pub id_to_uri: RwLock<HashMap<u32, String>>,
     pub uri_to_id: RwLock<HashMap<String, u32>>,
@@ -20,7 +29,22 @@ pub struct SynapseStore {
 impl SynapseStore {
     pub fn open(namespace: &str, storage_path: &str) -> Result<Self> {
         let path = PathBuf::from(storage_path).join(namespace);
-        let store = Store::open(path)?;
+        std::fs::create_dir_all(&path)?;
+        let store = Store::open(&path)?;
+        
+        // Load persisted URI mappings if they exist
+        let mappings_path = path.join("uri_mappings.json");
+        let (uri_to_id, id_to_uri, next_id) = if mappings_path.exists() {
+            let content = std::fs::read_to_string(&mappings_path)?;
+            let mappings: UriMappings = serde_json::from_str(&content)?;
+            let id_to_uri: HashMap<u32, String> = mappings.uri_to_id
+                .iter()
+                .map(|(uri, &id)| (id, uri.clone()))
+                .collect();
+            (mappings.uri_to_id, id_to_uri, mappings.next_id)
+        } else {
+            (HashMap::new(), HashMap::new(), 1)
+        };
         
         // Initialize vector store (optional, can fail gracefully)
         let vector_store = VectorStore::new(namespace)
@@ -30,11 +54,24 @@ impl SynapseStore {
         Ok(Self {
             store,
             namespace: namespace.to_string(),
-            id_to_uri: RwLock::new(HashMap::new()),
-            uri_to_id: RwLock::new(HashMap::new()),
-            next_id: std::sync::atomic::AtomicU32::new(1),
+            storage_path: path,
+            id_to_uri: RwLock::new(id_to_uri),
+            uri_to_id: RwLock::new(uri_to_id),
+            next_id: std::sync::atomic::AtomicU32::new(next_id),
             vector_store,
         })
+    }
+
+    /// Save URI mappings to disk
+    fn save_mappings(&self) -> Result<()> {
+        let uri_map = self.uri_to_id.read().unwrap();
+        let mappings = UriMappings {
+            uri_to_id: uri_map.clone(),
+            next_id: self.next_id.load(std::sync::atomic::Ordering::Relaxed),
+        };
+        let content = serde_json::to_string_pretty(&mappings)?;
+        std::fs::write(self.storage_path.join("uri_mappings.json"), content)?;
+        Ok(())
     }
 
     pub fn get_or_create_id(&self, uri: &str) -> u32 {
@@ -55,6 +92,12 @@ impl SynapseStore {
         let id = self.next_id.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         uri_map.insert(uri.to_string(), id);
         id_map.insert(id, uri.to_string());
+        
+        // Persist mappings (best effort, don't block on error)
+        drop(uri_map);
+        drop(id_map);
+        let _ = self.save_mappings();
+        
         id
     }
 
