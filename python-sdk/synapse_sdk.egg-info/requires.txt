@@ -1,0 +1,11 @@
+grpcio>=1.59.0
+protobuf>=4.24.0
+requests>=2.31.0
+pydantic>=2.5.0
+numpy>=1.24.0
+qdrant-client>=1.7.0
+html2text>=2024.2.26
+
+[ai]
+openai>=1.0.0
+litellm>=1.0.0
