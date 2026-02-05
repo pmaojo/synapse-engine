@@ -16,6 +16,7 @@
 ```bash
 npx skills install pmaojo/synapse-engine
 ```
+*Note: During installation, you will be prompted to set Synapse as your default memory provider.*
 
 ### Python SDK
 v0.4.0 introduces the official high-level SDK:

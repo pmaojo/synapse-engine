@@ -1,4 +1,5 @@
 {
+  "setup": "python3 scripts/setup_synapse.py",
   "mcpServers": {
     "synapse": {
       "command": "./synapse",
