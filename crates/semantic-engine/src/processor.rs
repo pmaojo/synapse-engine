@@ -56,7 +56,6 @@ impl TextProcessor {
         if !current_chunk.is_empty() {
             chunks.push(current_chunk.trim().to_string());
         }
-        }
 
         chunks
     }

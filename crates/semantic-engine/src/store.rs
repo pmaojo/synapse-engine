@@ -112,7 +112,6 @@ impl SynapseStore {
         triples: Vec<(String, String, String)>,
     ) -> Result<(u32, u32)> {
         let mut added = 0;
-        let mut vector_items = Vec::new();
 
         for (s, p, o) in triples {
             let subject_uri = self.ensure_uri(&s);
