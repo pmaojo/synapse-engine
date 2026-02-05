@@ -42,11 +42,30 @@ Robin will:
 3. Ingest them into the specified Synapse namespace.
 4. Your notes are now queryable via SPARQL or natural language!
 
+## 🏗️ Technical Architecture
+
+### 1. Ontology Management
+Ontologies are defined in standard OWL format within the `ontology/` directory (e.g., `core.owl`). 
+*   **Classes**: Hierarchical definitions (e.g., `Process` subClassOf `Event`).
+*   **Properties**: Object and Datatype properties with defined `domain` and `range`.
+*   **Evolution**: Following the **Architect's Loop**, new classes and properties are proposed when data doesn't fit existing schemas.
+
+### 2. Triple Validation
+Ingested triples are validated against current ontologies:
+*   **Semantic Consistency**: Ensures that subjects and objects match property domain/range constraints.
+*   **Inference-based Validation**: Uses the reasoner to check if new facts contradict existing knowledge (e.g., disjoint class violations).
+
+### 3. Reasoning Engine
+The **Synapse Reasoner** is implemented in Rust, providing:
+*   **RDFS Strategy**: Implements class and property transitivity.
+*   **OWL-RL Strategy**: Advanced rules including `SymmetricProperty`, `TransitiveProperty`, and `inverseOf` logic.
+*   **Materialization**: Derives implicit triples and stores them in the graph for fast retrieval.
+
 ## 🏗️ Features
 
 - **Blazing Fast Core**: Rust-based graph engine (Oxigraph).
 - **Native MCP**: Plugs directly into OpenClaw/Cursor.
-- **Reasoning Engine**: Built-in OWL reasoning via `reasonable`.
+- **Reasoning Engine**: Built-in OWL reasoning.
 - **Namespace Isolation**: Manage multiple knowledge bases (Work, Personal, Research).
 
 ---
