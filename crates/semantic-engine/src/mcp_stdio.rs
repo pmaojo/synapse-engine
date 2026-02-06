@@ -1,5 +1,8 @@
 use crate::mcp_types::{
-    CallToolResult, Content, ListToolsResult, McpError, McpRequest, McpResponse, Tool,
+    CallToolResult, Content, DegreeResult, DisambiguationItem, DisambiguationResult,
+    IngestToolResult, ListToolsResult, McpError, McpRequest, McpResponse, NeighborItem,
+    NeighborsToolResult, ReasoningToolResult, SearchResultItem, SearchToolResult,
+    SimpleSuccessResult, StatsToolResult, Tool, TripleItem, TriplesToolResult,
 };
 use crate::server::proto::semantic_engine_server::SemanticEngine;
 use crate::server::proto::{
@@ -229,10 +232,22 @@ impl McpStdioServer {
                     }
                 }),
             },
+            Tool {
+                name: "get_node_degree".to_string(),
+                description: Some("Get the degree (number of connections) of a node".to_string()),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "uri": { "type": "string" },
+                        "namespace": { "type": "string", "default": "default" }
+                    },
+                    "required": ["uri"]
+                }),
+            },
         ]
     }
 
-    async fn handle_request(&self, request: McpRequest) -> McpResponse {
+    pub async fn handle_request(&self, request: McpRequest) -> McpResponse {
         match request.method.as_str() {
             "initialize" => {
                 // MCP protocol initialization
@@ -246,7 +261,7 @@ impl McpStdioServer {
                         },
                         "serverInfo": {
                         "name": "synapse",
-                        "version": "0.5.0"
+                        "version": env!("CARGO_PKG_VERSION")
                     }
                     })),
                     error: None,
@@ -320,6 +335,7 @@ impl McpStdioServer {
             "compact_vectors" => self.call_compact_vectors(request.id, &arguments).await,
             "vector_stats" => self.call_vector_stats(request.id, &arguments).await,
             "disambiguate" => self.call_disambiguate(request.id, &arguments).await,
+            "get_node_degree" => self.call_get_node_degree(request.id, &arguments).await,
             _ => self.error_response(request.id, -32602, &format!("Unknown tool: {}", tool_name)),
         }
     }
@@ -367,11 +383,12 @@ impl McpStdioServer {
         match self.engine.ingest_triples(req).await {
             Ok(resp) => {
                 let inner = resp.into_inner();
-                self.tool_result(
-                    id,
-                    &format!("Ingested {} triples", inner.edges_added),
-                    false,
-                )
+                let result = IngestToolResult {
+                    nodes_added: inner.nodes_added,
+                    edges_added: inner.edges_added,
+                    message: format!("Ingested {} triples", inner.edges_added),
+                };
+                self.serialize_result(id, result)
             }
             Err(e) => self.tool_result(id, &e.to_string(), true),
         }
@@ -399,11 +416,12 @@ impl McpStdioServer {
         match self.engine.ingest_file(req).await {
             Ok(resp) => {
                 let inner = resp.into_inner();
-                self.tool_result(
-                    id,
-                    &format!("Ingested {} triples from {}", inner.edges_added, path),
-                    false,
-                )
+                let result = IngestToolResult {
+                    nodes_added: inner.nodes_added,
+                    edges_added: inner.edges_added,
+                    message: format!("Ingested {} triples from {}", inner.edges_added, path),
+                };
+                self.serialize_result(id, result)
             }
             Err(e) => self.tool_result(id, &e.to_string(), true),
         }
@@ -466,20 +484,18 @@ impl McpStdioServer {
         match self.engine.hybrid_search(req).await {
             Ok(resp) => {
                 let results = resp.into_inner().results;
-                // Manually serialize since proto SearchResult doesn't derive Serialize
-                let json_results: Vec<serde_json::Value> = results
-                    .iter()
-                    .map(|r| {
-                        serde_json::json!({
-                            "node_id": r.node_id,
-                            "score": r.score,
-                            "content": r.content,
-                            "uri": r.uri
-                        })
+                let items: Vec<SearchResultItem> = results
+                    .into_iter()
+                    .map(|r| SearchResultItem {
+                        node_id: r.node_id,
+                        score: r.score,
+                        content: r.content,
+                        uri: r.uri,
                     })
                     .collect();
-                let json = serde_json::to_string_pretty(&json_results).unwrap_or_default();
-                self.tool_result(id, &json, false)
+
+                let result = SearchToolResult { results: items };
+                self.serialize_result(id, result)
             }
             Err(e) => self.tool_result(id, &e.to_string(), true),
         }
@@ -517,7 +533,12 @@ impl McpStdioServer {
         match self.engine.apply_reasoning(req).await {
             Ok(resp) => {
                 let inner = resp.into_inner();
-                self.tool_result(id, &inner.message, !inner.success)
+                let result = ReasoningToolResult {
+                    success: inner.success,
+                    triples_inferred: inner.triples_inferred,
+                    message: inner.message,
+                };
+                self.serialize_result(id, result)
             }
             Err(e) => self.tool_result(id, &e.to_string(), true),
         }
@@ -556,11 +577,12 @@ impl McpStdioServer {
                     .quads_for_pattern(Some(subj.into()), None, None, None)
                     .flatten()
                 {
-                    neighbors.push(serde_json::json!({
-                        "direction": "outgoing",
-                        "predicate": q.predicate.to_string(),
-                        "target": q.object.to_string()
-                    }));
+                    neighbors.push(NeighborItem {
+                        direction: "outgoing".to_string(),
+                        predicate: q.predicate.to_string(),
+                        target: q.object.to_string(),
+                        score: 1.0,
+                    });
                 }
             }
         }
@@ -573,17 +595,18 @@ impl McpStdioServer {
                     .quads_for_pattern(None, None, Some(obj.into()), None)
                     .flatten()
                 {
-                    neighbors.push(serde_json::json!({
-                        "direction": "incoming",
-                        "predicate": q.predicate.to_string(),
-                        "source": q.subject.to_string()
-                    }));
+                    neighbors.push(NeighborItem {
+                        direction: "incoming".to_string(),
+                        predicate: q.predicate.to_string(),
+                        target: q.subject.to_string(),
+                        score: 1.0,
+                    });
                 }
             }
         }
 
-        let json = serde_json::to_string_pretty(&neighbors).unwrap_or_default();
-        self.tool_result(id, &json, false)
+        let result = NeighborsToolResult { neighbors };
+        self.serialize_result(id, result)
     }
 
     async fn call_list_triples(
@@ -604,15 +627,15 @@ impl McpStdioServer {
 
         let mut triples = Vec::new();
         for q in store.store.iter().take(limit).flatten() {
-            triples.push(serde_json::json!({
-                "subject": q.subject.to_string(),
-                "predicate": q.predicate.to_string(),
-                "object": q.object.to_string()
-            }));
+            triples.push(TripleItem {
+                subject: q.subject.to_string(),
+                predicate: q.predicate.to_string(),
+                object: q.object.to_string(),
+            });
         }
 
-        let json = serde_json::to_string_pretty(&triples).unwrap_or_default();
-        self.tool_result(id, &json, false)
+        let result = TriplesToolResult { triples };
+        self.serialize_result(id, result)
     }
 
     async fn call_delete_namespace(
@@ -632,7 +655,11 @@ impl McpStdioServer {
         match self.engine.delete_namespace_data(req).await {
             Ok(resp) => {
                 let inner = resp.into_inner();
-                self.tool_result(id, &inner.message, !inner.success)
+                let result = SimpleSuccessResult {
+                    success: inner.success,
+                    message: inner.message,
+                };
+                self.serialize_result(id, result)
             }
             Err(e) => self.tool_result(id, &e.to_string(), true),
         }
@@ -698,23 +725,30 @@ impl McpStdioServer {
             let mut added_chunks = 0;
             for (i, chunk) in chunks.iter().enumerate() {
                 let chunk_uri = format!("{}#chunk-{}", url, i);
-                match vector_store.add(&chunk_uri, chunk).await {
+                // For MCP ingestion, we just use the chunk URI as the key and metadata URI
+                let metadata = serde_json::json!({
+                    "uri": chunk_uri,
+                    "source_url": url,
+                    "type": "web_chunk"
+                });
+                match vector_store.add(&chunk_uri, chunk, metadata).await {
                     Ok(_) => added_chunks += 1,
                     Err(e) => {
                         eprintln!("Failed to add chunk {}: {}", i, e);
                     }
                 }
             }
-            self.tool_result(
-                id,
-                &format!(
+            let result = IngestToolResult {
+                nodes_added: 0,
+                edges_added: 0, // Ingest URL technically adds to vector store, no graph edges yet unless reasoned
+                message: format!(
                     "Ingested URL: {} ({} chars, {} chunks)",
                     url,
                     text.len(),
                     added_chunks
                 ),
-                false,
-            )
+            };
+            self.serialize_result(id, result)
         } else {
             self.tool_result(id, "Vector store not available", true)
         }
@@ -756,23 +790,29 @@ impl McpStdioServer {
                 } else {
                     uri.to_string()
                 };
-                match vector_store.add(&chunk_uri, chunk).await {
+                let metadata = serde_json::json!({
+                    "uri": uri, // Map back to original URI
+                    "chunk_uri": chunk_uri,
+                    "type": "text_chunk"
+                });
+                match vector_store.add(&chunk_uri, chunk, metadata).await {
                     Ok(_) => added_chunks += 1,
                     Err(e) => {
                         eprintln!("Failed to add chunk {}: {}", i, e);
                     }
                 }
             }
-            self.tool_result(
-                id,
-                &format!(
+            let result = IngestToolResult {
+                nodes_added: 0,
+                edges_added: 0,
+                message: format!(
                     "Ingested text: {} ({} chars, {} chunks)",
                     uri,
                     content.len(),
                     added_chunks
                 ),
-                false,
-            )
+            };
+            self.serialize_result(id, result)
         } else {
             self.tool_result(id, "Vector store not available", true)
         }
@@ -795,11 +835,13 @@ impl McpStdioServer {
 
         if let Some(ref vector_store) = store.vector_store {
             match vector_store.compact() {
-                Ok(removed) => self.tool_result(
-                    id,
-                    &format!("Compaction complete: {} stale entries removed", removed),
-                    false,
-                ),
+                Ok(removed) => {
+                    let result = SimpleSuccessResult {
+                        success: true,
+                        message: format!("Compaction complete: {} stale entries removed", removed),
+                    };
+                    self.serialize_result(id, result)
+                }
                 Err(e) => self.tool_result(id, &format!("Compaction error: {}", e), true),
             }
         } else {
@@ -824,11 +866,12 @@ impl McpStdioServer {
 
         if let Some(ref vector_store) = store.vector_store {
             let (active, stale, total) = vector_store.stats();
-            let msg = format!(
-                "Vector store stats:\n  Active: {}\n  Stale: {}\n  Total embeddings: {}",
-                active, stale, total
-            );
-            self.tool_result(id, &msg, false)
+            let result = StatsToolResult {
+                active_vectors: active,
+                stale_vectors: stale,
+                total_embeddings: total,
+            };
+            self.serialize_result(id, result)
         } else {
             self.tool_result(id, "Vector store not available", true)
         }
@@ -861,18 +904,26 @@ impl McpStdioServer {
         let disambiguator = crate::disambiguation::EntityDisambiguator::new(threshold);
         let suggestions = disambiguator.suggest_merges(&uris);
 
-        if suggestions.is_empty() {
-            self.tool_result(id, "No similar entities found above threshold", false)
+        let items: Vec<DisambiguationItem> = suggestions
+            .into_iter()
+            .map(|(u1, u2, s)| DisambiguationItem {
+                uri1: u1,
+                uri2: u2,
+                similarity: s,
+            })
+            .collect();
+
+        let message = if items.is_empty() {
+            "No similar entities found above threshold".to_string()
         } else {
-            let mut msg = format!("Found {} potential duplicates:\n", suggestions.len());
-            for (uri1, uri2, sim) in suggestions.iter().take(20) {
-                msg.push_str(&format!("  {:.2}%: {} <-> {}\n", sim * 100.0, uri1, uri2));
-            }
-            if suggestions.len() > 20 {
-                msg.push_str(&format!("  ... and {} more\n", suggestions.len() - 20));
-            }
-            self.tool_result(id, &msg, false)
-        }
+            format!("Found {} potential duplicates", items.len())
+        };
+
+        let result = DisambiguationResult {
+            suggestions: items,
+            message,
+        };
+        self.serialize_result(id, result)
     }
 
     // Legacy handlers for backward compatibility
@@ -962,6 +1013,46 @@ impl McpStdioServer {
         } else {
             self.error_response(request.id, -32602, "Invalid params: 'path' required")
         }
+    }
+
+    fn serialize_result<T: serde::Serialize>(
+        &self,
+        id: Option<serde_json::Value>,
+        result: T,
+    ) -> McpResponse {
+        match serde_json::to_string_pretty(&result) {
+            Ok(json) => self.tool_result(id, &json, false),
+            Err(e) => self.tool_result(id, &format!("Serialization error: {}", e), true),
+        }
+    }
+
+    async fn call_get_node_degree(
+        &self,
+        id: Option<serde_json::Value>,
+        args: &serde_json::Map<String, serde_json::Value>,
+    ) -> McpResponse {
+        let uri = match args.get("uri").and_then(|v| v.as_str()) {
+            Some(u) => u,
+            None => return self.error_response(id, -32602, "Missing 'uri'"),
+        };
+        let namespace = args
+            .get("namespace")
+            .and_then(|v| v.as_str())
+            .unwrap_or("default");
+
+        let store = match self.engine.get_store(namespace) {
+            Ok(s) => s,
+            Err(e) => return self.tool_result(id, &e.to_string(), true),
+        };
+
+        let degree = store.get_degree(uri);
+
+        let result = DegreeResult {
+            uri: uri.to_string(),
+            degree,
+        };
+
+        self.serialize_result(id, result)
     }
 
     fn error_response(
