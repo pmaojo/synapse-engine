@@ -116,7 +116,7 @@ class SemanticEngineClient:
         
         try:
             request = pb2.NodeRequest(node_id=node_id, namespace=namespace)
-            response = self.stub.GetNeighbors(request)
+            response = self.stub.GetNeighbors(request, metadata=self._get_metadata())
             return [
                 {"node_id": n.node_id, "edge_type": n.edge_type}
                 for n in response.neighbors
@@ -133,7 +133,7 @@ class SemanticEngineClient:
         
         try:
             request = pb2.ResolveRequest(content=name, namespace=namespace)
-            response = self.stub.ResolveId(request)
+            response = self.stub.ResolveId(request, metadata=self._get_metadata())
             return response.node_id if response.found else None
         except Exception as e:
             print(f"Error resolving ID: {e}")
@@ -147,7 +147,7 @@ class SemanticEngineClient:
         
         try:
             request = pb2.EmptyRequest(namespace=namespace)
-            response = self.stub.GetAllTriples(request)
+            response = self.stub.GetAllTriples(request, metadata=self._get_metadata())
             result = []
             for t in response.triples:
                 triple_dict = {
@@ -175,7 +175,7 @@ class SemanticEngineClient:
 
         try:
             request = pb2.EmptyRequest(namespace=namespace)
-            response = self.stub.DeleteTenantData(request)
+            response = self.stub.DeleteNamespaceData(request, metadata=self._get_metadata())
             return {
                 "success": response.success,
                 "message": response.message

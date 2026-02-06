@@ -50,6 +50,7 @@ async fn test_graph_traversal_scoring() {
         edge_filter: "".into(),
         limit_per_layer: 0,
         scoring_strategy: "default".into(),
+        node_type_filter: "".into(),
     });
 
     let resp_default = engine.get_neighbors(req_default).await.unwrap().into_inner();
@@ -71,6 +72,7 @@ async fn test_graph_traversal_scoring() {
         edge_filter: "".into(),
         limit_per_layer: 0,
         scoring_strategy: "degree".into(),
+        node_type_filter: "".into(),
     });
 
     let resp_degree = engine.get_neighbors(req_degree).await.unwrap().into_inner();

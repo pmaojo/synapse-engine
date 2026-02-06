@@ -163,6 +163,11 @@ impl SynapseStore {
                 let predicate_uri = self.ensure_uri(&p);
                 let object_uri = self.ensure_uri(&o);
 
+                // Register URIs in the ID mapping (for gRPC compatibility)
+                self.get_or_create_id(&subject_uri);
+                self.get_or_create_id(&predicate_uri);
+                self.get_or_create_id(&object_uri);
+
                 let subject = Subject::NamedNode(NamedNode::new_unchecked(&subject_uri));
                 let predicate = NamedNode::new_unchecked(&predicate_uri);
                 let object = Term::NamedNode(NamedNode::new_unchecked(&object_uri));
@@ -308,8 +313,8 @@ impl SynapseStore {
         }
     }
 
-    fn ensure_uri(&self, s: &str) -> String {
-        if s.starts_with("http") {
+    pub fn ensure_uri(&self, s: &str) -> String {
+        if s.starts_with("http") || s.starts_with("urn:") {
             s.to_string()
         } else {
             format!("http://synapse.os/{}", s)

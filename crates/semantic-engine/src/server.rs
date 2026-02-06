@@ -460,9 +460,11 @@ impl SemanticEngine for MySemanticEngine {
 
         let store = self.get_store(namespace)?;
 
+        let uri = store.ensure_uri(&req.content);
+
         // Look up the URI in our mapping
         let uri_to_id = store.uri_to_id.read().unwrap();
-        if let Some(&node_id) = uri_to_id.get(&req.content) {
+        if let Some(&node_id) = uri_to_id.get(&uri) {
             Ok(Response::new(ResolveResponse {
                 node_id,
                 found: true,
@@ -496,10 +498,19 @@ impl SemanticEngine for MySemanticEngine {
         let mut triples = Vec::new();
 
         for quad in store.store.iter().map(|q| q.unwrap()) {
+            let s = quad.subject.to_string();
+            let p = quad.predicate.to_string();
+            let o = quad.object.to_string();
+
+            // Clean up NTriples formatting (<uri> -> uri)
+            let clean_s = if s.starts_with('<') && s.ends_with('>') { s[1..s.len()-1].to_string() } else { s };
+            let clean_p = if p.starts_with('<') && p.ends_with('>') { p[1..p.len()-1].to_string() } else { p };
+            let clean_o = if o.starts_with('<') && o.ends_with('>') { o[1..o.len()-1].to_string() } else { o };
+
             triples.push(Triple {
-                subject: quad.subject.to_string(),
-                predicate: quad.predicate.to_string(),
-                object: quad.object.to_string(),
+                subject: clean_s,
+                predicate: clean_p,
+                object: clean_o,
                 provenance: Some(Provenance {
                     source: "oxigraph".to_string(),
                     timestamp: "".to_string(),
