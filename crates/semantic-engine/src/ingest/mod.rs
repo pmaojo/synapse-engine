@@ -1,4 +1,4 @@
-use crate::store::SynapseStore;
+use crate::store::{SynapseStore, IngestTriple};
 use anyhow::{Context, Result};
 use std::fs;
 use std::path::Path;
@@ -30,7 +30,17 @@ impl IngestionEngine {
             _ => anyhow::bail!("Unsupported file type: {}", extension),
         };
 
-        let (added, _) = self.store.ingest_triples(result.triples).await?;
+        // Convert (s, p, o) tuples to IngestTriple
+        let ingest_triples = result.triples.into_iter().map(|(s, p, o)| {
+             IngestTriple {
+                 subject: s,
+                 predicate: p,
+                 object: o,
+                 provenance: None, // Or we could add file provenance here
+             }
+        }).collect();
+
+        let (added, _) = self.store.ingest_triples(ingest_triples).await?;
         Ok(added)
     }
 }
