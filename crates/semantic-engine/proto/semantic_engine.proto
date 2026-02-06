@@ -84,6 +84,7 @@ message NodeRequest {
     string edge_filter = 5;     // Optional: filter by edge type (predicate)
     uint32 limit_per_layer = 6; // Max neighbors per depth level (0 = unlimited)
     string scoring_strategy = 7;// "default" or "degree" (penalize super-nodes)
+    string node_type_filter = 8; // Optional: filter neighbors by rdf:type
 }
 
 message NeighborResponse {
