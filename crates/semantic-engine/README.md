@@ -33,6 +33,8 @@ It is designed to work seamlessly with **OpenClaw** and other agentic frameworks
 - **HuggingFace API Integration**: High-performance embeddings without local GPU/CPU heavy lifting
 - **High Performance**: Written in Rust with async I/O and efficient HNSW indexing
 - **Persistent Storage**: Automatic persistence with namespace-specific storage paths
+- **Granular Security**: Token-based authorization for Read, Write, Delete, and Reason operations.
+- **Robust MCP**: Strict JSON Schema validation for all Model Context Protocol tool calls.
 
 ## 📦 Installation
 
@@ -217,7 +219,7 @@ The `SemanticEngine` service provides the following RPC methods:
 | Method                | Request               | Response            | Description                            |
 | --------------------- | --------------------- | ------------------- | -------------------------------------- |
 | `IngestTriples`       | `IngestRequest`       | `IngestResponse`    | Add RDF triples to the graph           |
-| `GetNeighbors`        | `NodeRequest`         | `NeighborResponse`  | Graph traversal (get connected nodes)  |
+| `GetNeighbors`        | `NodeRequest`         | `NeighborResponse`  | Graph traversal (supports edge & type filters) |
 | `Search`              | `SearchRequest`       | `SearchResponse`    | Legacy vector search                   |
 | `ResolveId`           | `ResolveRequest`      | `ResolveResponse`   | Resolve URI string to internal node ID |
 | `GetAllTriples`       | `EmptyRequest`        | `TriplesResponse`   | Retrieve all triples from a namespace  |
@@ -230,7 +232,8 @@ The `SemanticEngine` service provides the following RPC methods:
 
 ### MCP Tools
 
-When running in `--mcp` mode, the following tools are exposed:
+When running in `--mcp` mode, the engine exposes a rich set of tools via `tools/list` and `tools/call`.
+All tool inputs are strictly validated against their JSON Schema definitions.
 
 #### `query_graph`
 
@@ -271,6 +274,17 @@ Execute a SPARQL query on the knowledge graph.
   "namespace": "string (default: robin_os)"
 }
 ```
+
+### Security & Authorization
+
+Synapse implements a token-based authorization system. When using gRPC, tokens are extracted from the `Authorization: Bearer <token>` header.
+Permissions are defined via the `SYNAPSE_AUTH_TOKENS` environment variable (JSON format).
+
+Supported permissions:
+- `read`: Query data (`GetNeighbors`, `Search`, `SparqlQuery`, etc.)
+- `write`: Ingest data (`IngestTriples`, `IngestFile`)
+- `delete`: Delete data (`DeleteNamespaceData`)
+- `reason`: Trigger reasoning (`ApplyReasoning`)
 
 ## 🏗️ Architecture
 

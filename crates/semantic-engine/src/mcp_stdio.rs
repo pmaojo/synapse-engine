@@ -10,6 +10,7 @@ use crate::server::proto::{
     ReasoningStrategy, SearchMode, SparqlRequest, Triple,
 };
 use crate::server::MySemanticEngine;
+use jsonschema::JSONSchema;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tonic::Request;
@@ -304,6 +305,24 @@ impl McpStdioServer {
         }
     }
 
+    fn validate_arguments(tool_name: &str, arguments: &serde_json::Value) -> Result<(), String> {
+        let tools = Self::get_tools();
+        if let Some(tool) = tools.iter().find(|t| t.name == tool_name) {
+            if let Ok(schema) = JSONSchema::compile(&tool.input_schema) {
+                if let Err(errors) = schema.validate(arguments) {
+                    let error_msg = errors
+                        .map(|e| e.to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    return Err(format!("Validation error: {}", error_msg));
+                }
+            } else {
+                return Err("Invalid tool schema definition".to_string());
+            }
+        }
+        Ok(())
+    }
+
     async fn handle_tool_call(&self, request: McpRequest) -> McpResponse {
         let params = match request.params {
             Some(p) => p,
@@ -320,6 +339,11 @@ impl McpStdioServer {
             .and_then(|v| v.as_object())
             .cloned()
             .unwrap_or_default();
+
+        let args_value = serde_json::Value::Object(arguments.clone());
+        if let Err(e) = Self::validate_arguments(tool_name, &args_value) {
+            return self.error_response(request.id, -32602, &e);
+        }
 
         match tool_name {
             "ingest_triples" => self.call_ingest_triples(request.id, &arguments).await,
