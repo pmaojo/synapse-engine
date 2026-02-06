@@ -37,18 +37,24 @@ struct VectorData {
 
 #[derive(Serialize, Deserialize, Clone)]
 struct VectorEntry {
-    uri: String,
+    /// Unique identifier for this vector (could be URI or Hash)
+    key: String,
     embedding: Vec<f32>,
+    /// Optional metadata associated with the vector
+    #[serde(default)]
+    metadata: serde_json::Value,
 }
 
 /// Vector store using HuggingFace Inference API for embeddings
 pub struct VectorStore {
     /// HNSW index for fast approximate nearest neighbor search
     index: Arc<RwLock<Hnsw<Euclidian, Vec<f32>, Pcg64, 16, 32>>>,
-    /// Mapping from node ID to URI
-    id_to_uri: Arc<RwLock<HashMap<usize, String>>>,
-    /// Mapping from URI to node ID
-    uri_to_id: Arc<RwLock<HashMap<String, usize>>>,
+    /// Mapping from node ID (internal) to Key
+    id_to_key: Arc<RwLock<HashMap<usize, String>>>,
+    /// Mapping from Key to node ID (internal)
+    key_to_id: Arc<RwLock<HashMap<String, usize>>>,
+    /// Mapping from Key to Metadata (for fast retrieval)
+    key_to_metadata: Arc<RwLock<HashMap<String, serde_json::Value>>>,
     /// Storage path for persistence
     storage_path: Option<PathBuf>,
     /// HTTP client for HuggingFace API
@@ -65,9 +71,13 @@ pub struct VectorStore {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SearchResult {
-    pub uri: String,
+    /// The unique key
+    pub key: String,
     pub score: f32,
-    pub content: String,
+    /// Metadata (including original URI if applicable)
+    pub metadata: serde_json::Value,
+    // Helper to access URI from metadata if it exists, for backward compatibility
+    pub uri: String,
 }
 
 impl VectorStore {
@@ -86,8 +96,9 @@ impl VectorStore {
         
         // Create HNSW index with Euclidian metric
         let mut index = Hnsw::new(Euclidian);
-        let mut id_to_uri = HashMap::new();
-        let mut uri_to_id = HashMap::new();
+        let mut id_to_key = HashMap::new();
+        let mut key_to_id = HashMap::new();
+        let mut key_to_metadata = HashMap::new();
         let mut embeddings = Vec::new();
 
         // Try to load persisted vectors
@@ -95,17 +106,44 @@ impl VectorStore {
             let vectors_path = path.join("vectors.json");
             if vectors_path.exists() {
                 if let Ok(content) = std::fs::read_to_string(&vectors_path) {
+                    // Try new format first
                     if let Ok(data) = serde_json::from_str::<VectorData>(&content) {
                         let mut searcher = hnsw::Searcher::default();
                         for entry in data.entries {
                             if entry.embedding.len() == dimensions {
                                 let id = index.insert(entry.embedding.clone(), &mut searcher);
-                                id_to_uri.insert(id, entry.uri.clone());
-                                uri_to_id.insert(entry.uri.clone(), id);
+                                id_to_key.insert(id, entry.key.clone());
+                                key_to_id.insert(entry.key.clone(), id);
+                                key_to_metadata.insert(entry.key.clone(), entry.metadata.clone());
                                 embeddings.push(entry);
                             }
                         }
                         eprintln!("Loaded {} vectors from disk (dim={})", embeddings.len(), dimensions);
+                    } else {
+                        // Fallback: Try loading old format (VectorEntry with 'uri' instead of 'key')
+                        #[derive(Serialize, Deserialize)]
+                        struct OldVectorData { entries: Vec<OldVectorEntry> }
+                        #[derive(Serialize, Deserialize)]
+                        struct OldVectorEntry { uri: String, embedding: Vec<f32> }
+
+                        if let Ok(old_data) = serde_json::from_str::<OldVectorData>(&content) {
+                             let mut searcher = hnsw::Searcher::default();
+                             for old in old_data.entries {
+                                 if old.embedding.len() == dimensions {
+                                     let id = index.insert(old.embedding.clone(), &mut searcher);
+                                     id_to_key.insert(id, old.uri.clone());
+                                     key_to_id.insert(old.uri.clone(), id);
+                                     let metadata = serde_json::json!({ "uri": old.uri });
+                                     key_to_metadata.insert(old.uri.clone(), metadata.clone());
+                                     embeddings.push(VectorEntry {
+                                         key: old.uri.clone(),
+                                         embedding: old.embedding,
+                                         metadata,
+                                     });
+                                 }
+                             }
+                             eprintln!("Loaded {} legacy vectors from disk (dim={})", embeddings.len(), dimensions);
+                        }
                     }
                 }
             }
@@ -122,8 +160,9 @@ impl VectorStore {
 
         Ok(Self {
             index: Arc::new(RwLock::new(index)),
-            id_to_uri: Arc::new(RwLock::new(id_to_uri)),
-            uri_to_id: Arc::new(RwLock::new(uri_to_id)),
+            id_to_key: Arc::new(RwLock::new(id_to_key)),
+            key_to_id: Arc::new(RwLock::new(key_to_id)),
+            key_to_metadata: Arc::new(RwLock::new(key_to_metadata)),
             storage_path,
             client,
             api_token,
@@ -147,7 +186,16 @@ impl VectorStore {
     }
 
     /// Generate embedding for a text using HuggingFace Inference API
+    /// (Mocked if MOCK_EMBEDDINGS is set)
     pub async fn embed(&self, text: &str) -> Result<Vec<f32>> {
+        if std::env::var("MOCK_EMBEDDINGS").is_ok() {
+            // Return random embedding for testing
+            use rand::Rng;
+            let mut rng = rand::rng();
+            let vec: Vec<f32> = (0..self.dimensions).map(|_| rng.random()).collect();
+            return Ok(vec);
+        }
+
         let embeddings = self.embed_batch(vec![text.to_string()]).await?;
         Ok(embeddings[0].clone())
     }
@@ -156,6 +204,17 @@ impl VectorStore {
     pub async fn embed_batch(&self, texts: Vec<String>) -> Result<Vec<Vec<f32>>> {
         if texts.is_empty() {
             return Ok(Vec::new());
+        }
+
+        if std::env::var("MOCK_EMBEDDINGS").is_ok() {
+             use rand::Rng;
+             let mut rng = rand::rng();
+             let mut results = Vec::new();
+             for _ in 0..texts.len() {
+                 let vec: Vec<f32> = (0..self.dimensions).map(|_| rng.random()).collect();
+                 results.push(vec);
+             }
+             return Ok(results);
         }
 
         let url = format!(
@@ -211,23 +270,23 @@ impl VectorStore {
         Ok(results)
     }
 
-    /// Add a URI with its text content to the index
-    pub async fn add(&self, uri: &str, content: &str) -> Result<usize> {
-        let results = self.add_batch(vec![(uri.to_string(), content.to_string())]).await?;
+    /// Add a key with its text content to the index
+    pub async fn add(&self, key: &str, content: &str, metadata: serde_json::Value) -> Result<usize> {
+        let results = self.add_batch(vec![(key.to_string(), content.to_string(), metadata)]).await?;
         Ok(results[0])
     }
 
-    /// Add multiple URIs with their text content to the index
-    pub async fn add_batch(&self, items: Vec<(String, String)>) -> Result<Vec<usize>> {
-        // Filter out existing URIs
+    /// Add multiple keys with their text content to the index
+    pub async fn add_batch(&self, items: Vec<(String, String, serde_json::Value)>) -> Result<Vec<usize>> {
+        // Filter out existing keys
         let mut new_items = Vec::new();
         let mut result_ids = vec![0; items.len()];
         let mut new_indices = Vec::new(); // Map index in new_items to index in items
 
         {
-            let uri_map = self.uri_to_id.read().unwrap();
-            for (i, (uri, content)) in items.iter().enumerate() {
-                if let Some(&id) = uri_map.get(uri) {
+            let key_map = self.key_to_id.read().unwrap();
+            for (i, (key, content, _)) in items.iter().enumerate() {
+                if let Some(&id) = key_map.get(key) {
                     result_ids[i] = id;
                 } else {
                     new_items.push(content.clone());
@@ -249,27 +308,30 @@ impl VectorStore {
         // Add to HNSW index and maps
         {
             let mut index = self.index.write().unwrap();
-            let mut uri_map = self.uri_to_id.write().unwrap();
-            let mut id_map = self.id_to_uri.write().unwrap();
+            let mut key_map = self.key_to_id.write().unwrap();
+            let mut id_map = self.id_to_key.write().unwrap();
+            let mut metadata_map = self.key_to_metadata.write().unwrap();
             let mut embs = self.embeddings.write().unwrap();
 
             for (i, embedding) in embeddings.into_iter().enumerate() {
                 let original_idx = new_indices[i];
-                let uri = &items[original_idx].0;
+                let (key, _, metadata) = &items[original_idx];
 
                 // Double check if inserted in race condition
-                if let Some(&id) = uri_map.get(uri) {
+                if let Some(&id) = key_map.get(key) {
                     result_ids[original_idx] = id;
                     continue;
                 }
 
                 let id = index.insert(embedding.clone(), &mut searcher);
-                uri_map.insert(uri.clone(), id);
-                id_map.insert(id, uri.clone());
+                key_map.insert(key.clone(), id);
+                id_map.insert(id, key.clone());
+                metadata_map.insert(key.clone(), metadata.clone());
 
                 embs.push(VectorEntry {
-                    uri: uri.clone(),
+                    key: key.clone(),
                     embedding: embedding,
+                    metadata: metadata.clone(),
                 });
 
                 result_ids[original_idx] = id;
@@ -305,16 +367,24 @@ impl VectorStore {
         };
 
         // Convert to results
-        let id_map = self.id_to_uri.read().unwrap();
+        let id_map = self.id_to_key.read().unwrap();
+        let metadata_map = self.key_to_metadata.read().unwrap();
+
         let results: Vec<SearchResult> = found_neighbors
             .iter()
             .filter_map(|neighbor| {
-                id_map.get(&neighbor.index).map(|uri| {
+                id_map.get(&neighbor.index).map(|key| {
                     let score_f32 = (neighbor.distance as f32) / 1_000_000.0;
+
+                    let metadata = metadata_map.get(key).cloned().unwrap_or(serde_json::Value::Null);
+
+                    let uri = metadata.get("uri").and_then(|v| v.as_str()).unwrap_or(key).to_string();
+
                     SearchResult {
-                        uri: uri.clone(),
+                        key: key.clone(),
                         score: 1.0 / (1.0 + score_f32),
-                        content: uri.clone(),
+                        metadata,
+                        uri,
                     }
                 })
             })
@@ -323,16 +393,16 @@ impl VectorStore {
         Ok(results)
     }
 
-    pub fn get_uri(&self, id: usize) -> Option<String> {
-        self.id_to_uri.read().unwrap().get(&id).cloned()
+    pub fn get_key(&self, id: usize) -> Option<String> {
+        self.id_to_key.read().unwrap().get(&id).cloned()
     }
 
-    pub fn get_id(&self, uri: &str) -> Option<usize> {
-        self.uri_to_id.read().unwrap().get(uri).copied()
+    pub fn get_id(&self, key: &str) -> Option<usize> {
+        self.key_to_id.read().unwrap().get(key).copied()
     }
 
     pub fn len(&self) -> usize {
-        self.uri_to_id.read().unwrap().len()
+        self.key_to_id.read().unwrap().len()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -342,19 +412,16 @@ impl VectorStore {
     /// Compaction: rebuild index from stored embeddings, removing stale entries
     pub fn compact(&self) -> Result<usize> {
         let embeddings = self.embeddings.read().unwrap();
-        let current_uris: std::collections::HashSet<_> = self.uri_to_id.read().unwrap().keys().cloned().collect();
+        let current_keys: std::collections::HashSet<_> = self.key_to_id.read().unwrap().keys().cloned().collect();
         
-        // Safeguard: If uri_to_id is empty, avoid compaction unless embeddings is also empty
-        // to prevent accidental deletion if mappings were lost.
-        if current_uris.is_empty() && !embeddings.is_empty() {
-            // We return 0 and skip compaction to be safe
+        if current_keys.is_empty() && !embeddings.is_empty() {
             return Ok(0);
         }
 
-        // Filter to only current URIs
+        // Filter to only current Keys
         let active_entries: Vec<_> = embeddings
             .iter()
-            .filter(|e| current_uris.contains(&e.uri))
+            .filter(|e| current_keys.contains(&e.key))
             .cloned()
             .collect();
 
@@ -366,22 +433,25 @@ impl VectorStore {
 
         // Rebuild index
         let mut new_index = hnsw::Hnsw::new(Euclidian);
-        let mut new_id_to_uri = std::collections::HashMap::new();
-        let mut new_uri_to_id = std::collections::HashMap::new();
+        let mut new_id_to_key = std::collections::HashMap::new();
+        let mut new_key_to_id = std::collections::HashMap::new();
+        let mut new_key_to_metadata = std::collections::HashMap::new();
         let mut searcher = hnsw::Searcher::default();
 
         for entry in &active_entries {
             if entry.embedding.len() == self.dimensions {
                 let id = new_index.insert(entry.embedding.clone(), &mut searcher);
-                new_id_to_uri.insert(id, entry.uri.clone());
-                new_uri_to_id.insert(entry.uri.clone(), id);
+                new_id_to_key.insert(id, entry.key.clone());
+                new_key_to_id.insert(entry.key.clone(), id);
+                new_key_to_metadata.insert(entry.key.clone(), entry.metadata.clone());
             }
         }
 
         // Swap in new index
         *self.index.write().unwrap() = new_index;
-        *self.id_to_uri.write().unwrap() = new_id_to_uri;
-        *self.uri_to_id.write().unwrap() = new_uri_to_id;
+        *self.id_to_key.write().unwrap() = new_id_to_key;
+        *self.key_to_id.write().unwrap() = new_key_to_id;
+        *self.key_to_metadata.write().unwrap() = new_key_to_metadata;
 
         // Update embeddings (drop takes write lock)
         drop(embeddings);
@@ -392,13 +462,15 @@ impl VectorStore {
         Ok(removed)
     }
 
-    /// Remove a URI from the vector store
-    pub fn remove(&self, uri: &str) -> bool {
-        let mut uri_map = self.uri_to_id.write().unwrap();
-        let mut id_map = self.id_to_uri.write().unwrap();
+    /// Remove a Key from the vector store
+    pub fn remove(&self, key: &str) -> bool {
+        let mut key_map = self.key_to_id.write().unwrap();
+        let mut id_map = self.id_to_key.write().unwrap();
+        let mut metadata_map = self.key_to_metadata.write().unwrap();
 
-        if let Some(id) = uri_map.remove(uri) {
+        if let Some(id) = key_map.remove(key) {
             id_map.remove(&id);
+            metadata_map.remove(key);
             // Note: actual index entry remains until compaction
             true
         } else {
@@ -409,7 +481,7 @@ impl VectorStore {
     /// Get storage stats
     pub fn stats(&self) -> (usize, usize, usize) {
         let embeddings_count = self.embeddings.read().unwrap().len();
-        let active_count = self.uri_to_id.read().unwrap().len();
+        let active_count = self.key_to_id.read().unwrap().len();
         let stale_count = embeddings_count.saturating_sub(active_count);
         (active_count, stale_count, embeddings_count)
     }

@@ -83,6 +83,7 @@ message NodeRequest {
     uint32 depth = 4;           // Traversal depth (default: 1)
     string edge_filter = 5;     // Optional: filter by edge type (predicate)
     uint32 limit_per_layer = 6; // Max neighbors per depth level (0 = unlimited)
+    string scoring_strategy = 7;// "default" or "degree" (penalize super-nodes)
 }
 
 message NeighborResponse {
