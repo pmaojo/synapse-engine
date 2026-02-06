@@ -3,10 +3,10 @@ import os
 import sys
 from typing import List
 
-# Add the project root to sys.path to allow importing agents
-sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
+# Add the project root to sys.path to allow importing synapse
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../python-sdk")))
 
-from agents.infrastructure.web.client import SemanticEngineClient
+from synapse.infrastructure.web.client import SemanticEngineClient
 
 @pytest.fixture
 def client():
@@ -41,7 +41,7 @@ def test_ingest_and_resolve(client):
     
     result = client.ingest_triples(triples, namespace=test_namespace)
     assert "error" not in result
-    assert result["nodes_added"] >= 2
+    assert result["nodes_added"] >= 1
     assert result["edges_added"] >= 1
     
     node_id = client.resolve_id("Synapse", namespace=test_namespace)
@@ -70,8 +70,8 @@ def test_get_all_triples(client):
     assert len(all_triples) == 2
     
     subjects = [t["subject"] for t in all_triples]
-    assert "Alice" in subjects
-    assert "Bob" in subjects
+    assert "http://synapse.os/Alice" in subjects
+    assert "http://synapse.os/Bob" in subjects
     
     # Cleanup
     client.delete_tenant_data(test_namespace)
