@@ -1,0 +1,25 @@
+# Synapse Semantic Engine - Python Dependencies
+
+# Core
+grpcio>=1.59.0
+protobuf>=4.24.0
+requests>=2.31.0
+pydantic>=2.5.0
+numpy>=1.24.0
+qdrant-client>=1.7.0
+html2text>=2024.2.26
+
+# AI & Embeddings
+sentence-transformers>=2.2.2
+torch>=2.0.0
+sympy>=1.12
+
+# Known Issue Fix: Pin huggingface-hub to avoid version conflict with transformers
+huggingface-hub==0.23.2
+transformers>=4.40.0
+
+# Development & Testing
+pytest>=7.4.0
+black>=23.9.1
+isort>=5.12.0
+mypy>=1.5.1

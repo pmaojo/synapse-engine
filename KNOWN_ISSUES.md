@@ -29,5 +29,5 @@
 
 ## 🧪 Testing
 
-- **Automated Tests**: The E2E test suite (`tests/test_e2e.py`) is currently disabled due to the module path migration.
-- **Verification**: Core functionality is verified manually via the Gradio UI (`app.py`).
+- **Automated Tests**: The E2E test suite (`tests/test_e2e.py`) has been reactivated and updated to work with the new DDD module structure.
+- **Verification**: Core functionality is verified via `pytest tests/` and the Gradio UI (`app.py`).

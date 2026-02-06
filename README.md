@@ -90,5 +90,25 @@ The Rust core implements a multi-strategy reasoner:
 ### 3. Robust Ingestion
 v0.4.0 includes a new **Rollback Mechanism**: if vector indexing fails during ingestion, graph changes are automatically reverted to maintain memory integrity.
 
+## 🧪 Testing
+
+Synapse includes an E2E test suite to verify the integration between the Python client and Rust backend.
+
+```bash
+# Ensure Rust server is running
+./start_rust_server.sh
+
+# Run tests
+pytest tests/
+```
+
+## 🤝 Contributing
+
+We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines on how to get started.
+
+## ⚖️ License
+
+This project is licensed under the **MIT License** - see the [LICENSE](LICENSE) file for details.
+
 ---
 *Developed by Pelayo Maojo & the Synapse Team*
