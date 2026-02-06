@@ -174,12 +174,18 @@ impl SemanticEngine for MySemanticEngine {
         &self,
         request: Request<NodeRequest>,
     ) -> Result<Response<NeighborResponse>, Status> {
+        let token = get_token(&request);
         let req = request.into_inner();
         let namespace = if req.namespace.is_empty() {
             "default"
         } else {
             &req.namespace
         };
+
+        if let Err(e) = self.auth.check(token.as_deref(), namespace, "read") {
+            return Err(Status::permission_denied(e));
+        }
+
         let store = self.get_store(namespace)?;
 
         let direction = if req.direction.is_empty() {
@@ -191,6 +197,11 @@ impl SemanticEngine for MySemanticEngine {
             None
         } else {
             Some(req.edge_filter.as_str())
+        };
+        let node_type_filter = if req.node_type_filter.is_empty() {
+            None
+        } else {
+            Some(req.node_type_filter.as_str())
         };
         let max_depth = if req.depth == 0 {
             1
@@ -245,6 +256,26 @@ impl SemanticEngine for MySemanticEngine {
                                 }
                                 let obj_term = q.object;
                                 let obj_uri = obj_term.to_string();
+
+                                // Node Type Filter Logic
+                                if let Some(type_filter) = node_type_filter {
+                                    let passed = if let oxigraph::model::Term::NamedNode(ref n) = obj_term {
+                                        let rdf_type = oxigraph::model::NamedNodeRef::new("http://www.w3.org/1999/02/22-rdf-syntax-ns#type").unwrap();
+                                        if let Ok(target_type) = oxigraph::model::NamedNodeRef::new(type_filter) {
+                                            store.store.quads_for_pattern(
+                                                Some(n.into()),
+                                                Some(rdf_type.into()),
+                                                Some(target_type.into()),
+                                                None
+                                            ).next().is_some()
+                                        } else {
+                                            false
+                                        }
+                                    } else {
+                                        false
+                                    };
+                                    if !passed { continue; }
+                                }
 
                                 let clean_uri = match &obj_term {
                                     oxigraph::model::Term::NamedNode(n) => n.as_str(),
@@ -302,6 +333,26 @@ impl SemanticEngine for MySemanticEngine {
                                 let subj_term = q.subject;
                                 let subj_uri = subj_term.to_string();
 
+                                // Node Type Filter Logic
+                                if let Some(type_filter) = node_type_filter {
+                                    let passed = if let oxigraph::model::Subject::NamedNode(ref n) = subj_term {
+                                        let rdf_type = oxigraph::model::NamedNodeRef::new("http://www.w3.org/1999/02/22-rdf-syntax-ns#type").unwrap();
+                                        if let Ok(target_type) = oxigraph::model::NamedNodeRef::new(type_filter) {
+                                            store.store.quads_for_pattern(
+                                                Some(n.into()),
+                                                Some(rdf_type.into()),
+                                                Some(target_type.into()),
+                                                None
+                                            ).next().is_some()
+                                        } else {
+                                            false
+                                        }
+                                    } else {
+                                        false
+                                    };
+                                    if !passed { continue; }
+                                }
+
                                 let clean_uri = match &subj_term {
                                     oxigraph::model::Subject::NamedNode(n) => n.as_str(),
                                     _ => &subj_uri,
@@ -357,12 +408,18 @@ impl SemanticEngine for MySemanticEngine {
         &self,
         request: Request<SearchRequest>,
     ) -> Result<Response<SearchResponse>, Status> {
+        let token = get_token(&request);
         let req = request.into_inner();
         let namespace = if req.namespace.is_empty() {
             "default"
         } else {
             &req.namespace
         };
+
+        if let Err(e) = self.auth.check(token.as_deref(), namespace, "read") {
+            return Err(Status::permission_denied(e));
+        }
+
         let store = self.get_store(namespace)?;
 
         match store.hybrid_search(&req.query, req.limit as usize, 0).await {
@@ -389,12 +446,18 @@ impl SemanticEngine for MySemanticEngine {
         &self,
         request: Request<ResolveRequest>,
     ) -> Result<Response<ResolveResponse>, Status> {
+        let token = get_token(&request);
         let req = request.into_inner();
         let namespace = if req.namespace.is_empty() {
             "default"
         } else {
             &req.namespace
         };
+
+        if let Err(e) = self.auth.check(token.as_deref(), namespace, "read") {
+            return Err(Status::permission_denied(e));
+        }
+
         let store = self.get_store(namespace)?;
 
         // Look up the URI in our mapping
@@ -416,12 +479,18 @@ impl SemanticEngine for MySemanticEngine {
         &self,
         request: Request<EmptyRequest>,
     ) -> Result<Response<TriplesResponse>, Status> {
+        let token = get_token(&request);
         let req = request.into_inner();
         let namespace = if req.namespace.is_empty() {
             "default"
         } else {
             &req.namespace
         };
+
+        if let Err(e) = self.auth.check(token.as_deref(), namespace, "read") {
+            return Err(Status::permission_denied(e));
+        }
+
         let store = self.get_store(namespace)?;
 
         let mut triples = Vec::new();
@@ -447,12 +516,18 @@ impl SemanticEngine for MySemanticEngine {
         &self,
         request: Request<SparqlRequest>,
     ) -> Result<Response<SparqlResponse>, Status> {
+        let token = get_token(&request);
         let req = request.into_inner();
         let namespace = if req.namespace.is_empty() {
             "default"
         } else {
             &req.namespace
         };
+
+        if let Err(e) = self.auth.check(token.as_deref(), namespace, "read") {
+            return Err(Status::permission_denied(e));
+        }
+
         let store = self.get_store(namespace)?;
 
         match store.query_sparql(&req.query) {
@@ -465,12 +540,17 @@ impl SemanticEngine for MySemanticEngine {
         &self,
         request: Request<EmptyRequest>,
     ) -> Result<Response<DeleteResponse>, Status> {
+        let token = get_token(&request);
         let req = request.into_inner();
         let namespace = if req.namespace.is_empty() {
             "default"
         } else {
             &req.namespace
         };
+
+        if let Err(e) = self.auth.check(token.as_deref(), namespace, "delete") {
+            return Err(Status::permission_denied(e));
+        }
 
         // Remove from cache
         self.stores.remove(namespace);
@@ -491,12 +571,18 @@ impl SemanticEngine for MySemanticEngine {
         &self,
         request: Request<HybridSearchRequest>,
     ) -> Result<Response<SearchResponse>, Status> {
+        let token = get_token(&request);
         let req = request.into_inner();
         let namespace = if req.namespace.is_empty() {
             "default"
         } else {
             &req.namespace
         };
+
+        if let Err(e) = self.auth.check(token.as_deref(), namespace, "read") {
+            return Err(Status::permission_denied(e));
+        }
+
         let store = self.get_store(namespace)?;
 
         let vector_k = req.vector_k as usize;

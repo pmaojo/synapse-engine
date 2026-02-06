@@ -20,6 +20,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         eprintln!("Synapse-MCP starting (stdio mode)...");
         run_mcp_stdio(Arc::new(engine)).await?;
     } else {
+        println!(
+            r#"
+
+  _________.__. ____ _____  ______  ______ ____
+ /  ___<   |  |/    \\__  \ \____ \/  ___// __ \
+ \___ \ \___  |   |  \/ __ \|  |_> >___ \\  ___/
+/____  >/ ____|___|  (____  /   __/____  >\___  >
+     \/ \/         \/     \/|__|       \/     \/
+"#
+        );
         let addr = "[::1]:50051".parse()?;
         println!("🚀 Synapse (ex-Grafoso) listening on {}", addr);
         println!("Storage Path: {}", storage_path);
