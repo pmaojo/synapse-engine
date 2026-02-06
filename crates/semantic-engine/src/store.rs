@@ -6,12 +6,27 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
+use uuid::Uuid;
 
 /// Persisted URI mappings
 #[derive(Serialize, Deserialize, Default)]
 struct UriMappings {
     uri_to_id: HashMap<String, u32>,
     next_id: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct Provenance {
+    pub source: String,
+    pub timestamp: String,
+    pub method: String,
+}
+
+pub struct IngestTriple {
+    pub subject: String,
+    pub predicate: String,
+    pub object: String,
+    pub provenance: Option<Provenance>,
 }
 
 pub struct SynapseStore {
@@ -109,35 +124,81 @@ impl SynapseStore {
 
     pub async fn ingest_triples(
         &self,
-        triples: Vec<(String, String, String)>,
+        triples: Vec<IngestTriple>,
     ) -> Result<(u32, u32)> {
         let mut added = 0;
 
-        for (s, p, o) in triples {
-            let subject_uri = self.ensure_uri(&s);
-            let predicate_uri = self.ensure_uri(&p);
-            let object_uri = self.ensure_uri(&o);
+        // Group by provenance to optimize batch insertion into named graphs
+        let mut batches: HashMap<Option<Provenance>, Vec<(String, String, String)>> = HashMap::new();
 
-            let subject = Subject::NamedNode(NamedNode::new_unchecked(&subject_uri));
-            let predicate = NamedNode::new_unchecked(&predicate_uri);
-            let object = Term::NamedNode(NamedNode::new_unchecked(&object_uri));
+        for t in triples {
+            batches.entry(t.provenance).or_default().push((t.subject, t.predicate, t.object));
+        }
 
-            let quad = Quad::new(subject, predicate, object, GraphName::DefaultGraph);
-            if self.store.insert(&quad)? {
-                // Also index in vector store if available
-                if let Some(ref vs) = self.vector_store {
-                    // Create searchable content from triple
-                    let content = format!("{} {} {}", s, p, o);
-                    if let Err(e) = vs.add(&subject_uri, &content).await {
-                        // Rollback graph insertion to ensure consistency
-                        self.store.remove(&quad)?;
-                        return Err(anyhow::anyhow!(
-                            "Vector store insertion failed, rolled back graph change: {}",
-                            e
-                        ));
+        for (prov, batch_triples) in batches {
+             let graph_name = if let Some(p) = &prov {
+                 let uuid = Uuid::new_v4();
+                 let uri = format!("urn:batch:{}", uuid);
+
+                 let batch_node = NamedNode::new_unchecked(&uri);
+                 let p_derived = NamedNode::new_unchecked("http://www.w3.org/ns/prov#wasDerivedFrom");
+                 let p_time = NamedNode::new_unchecked("http://www.w3.org/ns/prov#generatedAtTime");
+                 let p_method = NamedNode::new_unchecked("http://www.w3.org/ns/prov#wasGeneratedBy");
+
+                 let o_source = Literal::new_simple_literal(&p.source);
+                 let o_time = Literal::new_simple_literal(&p.timestamp);
+                 let o_method = Literal::new_simple_literal(&p.method);
+
+                 self.store.insert(&Quad::new(batch_node.clone(), p_derived, o_source, GraphName::DefaultGraph))?;
+                 self.store.insert(&Quad::new(batch_node.clone(), p_time, o_time, GraphName::DefaultGraph))?;
+                 self.store.insert(&Quad::new(batch_node.clone(), p_method, o_method, GraphName::DefaultGraph))?;
+
+                 GraphName::NamedNode(batch_node)
+             } else {
+                 GraphName::DefaultGraph
+             };
+
+            for (s, p, o) in batch_triples {
+                let subject_uri = self.ensure_uri(&s);
+                let predicate_uri = self.ensure_uri(&p);
+                let object_uri = self.ensure_uri(&o);
+
+                let subject = Subject::NamedNode(NamedNode::new_unchecked(&subject_uri));
+                let predicate = NamedNode::new_unchecked(&predicate_uri);
+                let object = Term::NamedNode(NamedNode::new_unchecked(&object_uri));
+
+                let quad = Quad::new(subject, predicate, object, graph_name.clone());
+                if self.store.insert(&quad)? {
+                    // Also index in vector store if available
+                    if let Some(ref vs) = self.vector_store {
+                        // Create searchable content from triple
+                        let content = format!("{} {} {}", s, p, o);
+                        // Use a deterministic hash/key for the triple to allow multiple triples per subject
+                        // We use the content itself as key or a hash of it.
+                        // Ideally we should use a hash, but for simplicity let's use the formatted content string as key prefix?
+                        // Actually, just using a unique ID is fine, but we want idempotency.
+                        // format!("{}|{}|{}", s, p, o)
+                        let key = format!("{}|{}|{}", subject_uri, predicate_uri, object_uri);
+
+                        // Pass metadata including the subject URI for graph expansion later
+                        let metadata = serde_json::json!({
+                            "uri": subject_uri,
+                            "predicate": predicate_uri,
+                            "object": object_uri,
+                            "type": "triple"
+                        });
+
+                        if let Err(e) = vs.add(&key, &content, metadata).await {
+                            // Rollback graph insertion to ensure consistency
+                            self.store.remove(&quad)?;
+                            return Err(anyhow::anyhow!(
+                                "Vector store insertion failed, rolled back graph change: {}",
+                                e
+                            ));
+                        }
                     }
+                    added += 1;
                 }
-                added += 1;
             }
         }
 
@@ -158,14 +219,16 @@ impl SynapseStore {
             let vector_results = vs.search(query, vector_k).await?;
 
             for result in vector_results {
-                results.push((result.uri.clone(), result.score));
+                // Use the URI from metadata/result (which maps to Subject URI for triples)
+                let uri = result.uri.clone();
+                results.push((uri.clone(), result.score));
 
                 // Step 2: Graph expansion (if depth > 0)
                 if graph_depth > 0 {
-                    let expanded = self.expand_graph(&result.uri, graph_depth)?;
-                    for uri in expanded {
+                    let expanded = self.expand_graph(&uri, graph_depth)?;
+                    for expanded_uri in expanded {
                         // Add with slightly lower score
-                        results.push((uri, result.score * 0.8));
+                        results.push((expanded_uri, result.score * 0.8));
                     }
                 }
             }
@@ -231,6 +294,17 @@ impl SynapseStore {
                 Ok(serde_json::to_string(&results_array)?)
             }
             _ => Ok("[]".to_string()),
+        }
+    }
+
+    pub fn get_degree(&self, uri: &str) -> usize {
+        let node = NamedNodeRef::new(uri).ok();
+        if let Some(n) = node {
+             let outgoing = self.store.quads_for_pattern(Some(n.into()), None, None, None).count();
+             let incoming = self.store.quads_for_pattern(None, None, Some(n.into()), None).count();
+             outgoing + incoming
+        } else {
+            0
         }
     }
 

@@ -12,7 +12,7 @@ use proto::*;
 use crate::ingest::IngestionEngine;
 use crate::reasoner::{ReasoningStrategy as InternalStrategy, SynapseReasoner};
 use crate::server::proto::{ReasoningStrategy, SearchMode};
-use crate::store::SynapseStore;
+use crate::store::{SynapseStore, IngestTriple};
 use std::path::Path;
 
 use crate::audit::InferenceAudit;
@@ -103,7 +103,7 @@ impl SemanticEngine for MySemanticEngine {
         let triple_count = req.triples.len();
         let mut sources: Vec<String> = Vec::new();
 
-        let triples: Vec<(String, String, String)> = req
+        let triples: Vec<IngestTriple> = req
             .triples
             .into_iter()
             .map(|t| {
@@ -113,7 +113,16 @@ impl SemanticEngine for MySemanticEngine {
                         sources.push(prov.source.clone());
                     }
                 }
-                (t.subject, t.predicate, t.object)
+                IngestTriple {
+                    subject: t.subject,
+                    predicate: t.predicate,
+                    object: t.object,
+                    provenance: t.provenance.map(|p| crate::store::Provenance {
+                        source: p.source,
+                        timestamp: p.timestamp,
+                        method: p.method,
+                    }),
+                }
             })
             .collect();
 
@@ -208,7 +217,7 @@ impl SemanticEngine for MySemanticEngine {
         for current_depth in 1..=max_depth {
             let mut next_frontier = Vec::new();
             let mut layer_count = 0;
-            let score = 1.0 / current_depth as f32; // Path scoring: closer = higher
+            let base_score = 1.0 / current_depth as f32; // Path scoring: closer = higher
 
             for uri in &current_frontier {
                 if layer_count >= limit_per_layer {
@@ -234,17 +243,34 @@ impl SemanticEngine for MySemanticEngine {
                                         continue;
                                     }
                                 }
-                                let obj_uri = q.object.to_string();
+                                let obj_term = q.object;
+                                let obj_uri = obj_term.to_string();
+
+                                let clean_uri = match &obj_term {
+                                    oxigraph::model::Term::NamedNode(n) => n.as_str(),
+                                    _ => &obj_uri,
+                                };
+
                                 if !visited.contains(&obj_uri) {
                                     visited.insert(obj_uri.clone());
                                     let obj_id = store.get_or_create_id(&obj_uri);
+
+                                    let mut neighbor_score = base_score;
+                                    if req.scoring_strategy == "degree" {
+                                        let degree = store.get_degree(clean_uri);
+                                        // Penalize if degree > 1
+                                        if degree > 1 {
+                                             neighbor_score /= (degree as f32).ln().max(1.0);
+                                        }
+                                    }
+
                                     neighbors.push(Neighbor {
                                         node_id: obj_id,
                                         edge_type: pred,
                                         uri: obj_uri.clone(),
                                         direction: "outgoing".to_string(),
                                         depth: current_depth as u32,
-                                        score,
+                                        score: neighbor_score,
                                     });
                                     next_frontier.push(obj_uri);
                                     layer_count += 1;
@@ -273,17 +299,34 @@ impl SemanticEngine for MySemanticEngine {
                                         continue;
                                     }
                                 }
-                                let subj_uri = q.subject.to_string();
+                                let subj_term = q.subject;
+                                let subj_uri = subj_term.to_string();
+
+                                let clean_uri = match &subj_term {
+                                    oxigraph::model::Subject::NamedNode(n) => n.as_str(),
+                                    _ => &subj_uri,
+                                };
+
                                 if !visited.contains(&subj_uri) {
                                     visited.insert(subj_uri.clone());
                                     let subj_id = store.get_or_create_id(&subj_uri);
+
+                                    let mut neighbor_score = base_score;
+                                    if req.scoring_strategy == "degree" {
+                                        let degree = store.get_degree(clean_uri);
+                                        // Penalize if degree > 1
+                                        if degree > 1 {
+                                             neighbor_score /= (degree as f32).ln().max(1.0);
+                                        }
+                                    }
+
                                     neighbors.push(Neighbor {
                                         node_id: subj_id,
                                         edge_type: pred,
                                         uri: subj_uri.clone(),
                                         direction: "incoming".to_string(),
                                         depth: current_depth as u32,
-                                        score,
+                                        score: neighbor_score,
                                     });
                                     next_frontier.push(subj_uri);
                                     layer_count += 1;
