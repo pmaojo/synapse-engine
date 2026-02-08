@@ -1,3 +1,4 @@
+use crate::persistence::{load_bincode, save_bincode};
 use crate::vector_store::VectorStore;
 use anyhow::Result;
 use oxigraph::model::*;
@@ -5,8 +6,11 @@ use oxigraph::store::Store;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 use uuid::Uuid;
+
+const DEFAULT_MAPPING_SAVE_THRESHOLD: usize = 1000;
 
 /// Persisted URI mappings
 #[derive(Serialize, Deserialize, Default)]
@@ -39,6 +43,9 @@ pub struct SynapseStore {
     pub next_id: std::sync::atomic::AtomicU32,
     // Vector store for hybrid search
     pub vector_store: Option<Arc<VectorStore>>,
+    // Persistence state
+    dirty_count: AtomicUsize,
+    save_threshold: usize,
 }
 
 impl SynapseStore {
@@ -48,9 +55,19 @@ impl SynapseStore {
         let store = Store::open(&path)?;
 
         // Load persisted URI mappings if they exist
-        let mappings_path = path.join("uri_mappings.json");
-        let (uri_to_id, id_to_uri, next_id) = if mappings_path.exists() {
-            let content = std::fs::read_to_string(&mappings_path)?;
+        let mappings_path_bin = path.join("uri_mappings.bin");
+        let mappings_path_json = path.join("uri_mappings.json");
+
+        let (uri_to_id, id_to_uri, next_id) = if mappings_path_bin.exists() {
+            let mappings: UriMappings = load_bincode(&mappings_path_bin)?;
+            let id_to_uri: HashMap<u32, String> = mappings
+                .uri_to_id
+                .iter()
+                .map(|(uri, &id)| (id, uri.clone()))
+                .collect();
+            (mappings.uri_to_id, id_to_uri, mappings.next_id)
+        } else if mappings_path_json.exists() {
+            let content = std::fs::read_to_string(&mappings_path_json)?;
             let mappings: UriMappings = serde_json::from_str(&content)?;
             let id_to_uri: HashMap<u32, String> = mappings
                 .uri_to_id
@@ -73,13 +90,38 @@ impl SynapseStore {
             uri_to_id: RwLock::new(uri_to_id),
             next_id: std::sync::atomic::AtomicU32::new(next_id),
             vector_store,
+            dirty_count: AtomicUsize::new(0),
+            save_threshold: DEFAULT_MAPPING_SAVE_THRESHOLD,
         })
     }
 
     /// Save URI mappings to disk
-    fn save_mappings(&self, mappings: UriMappings) -> Result<()> {
-        let content = serde_json::to_string_pretty(&mappings)?;
-        std::fs::write(self.storage_path.join("uri_mappings.json"), content)?;
+    fn save_mappings(&self) -> Result<()> {
+        let mappings = UriMappings {
+            uri_to_id: self.uri_to_id.read().unwrap().clone(),
+            next_id: self.next_id.load(std::sync::atomic::Ordering::Relaxed),
+        };
+        // Capture the count before saving? No, we just care that we saved the current state.
+        // But if new items are added during save, the dirty count will increment.
+        // We need to subtract what we think we saved.
+        // Since we save the *entire* map, we effectively save *all* dirty items up to that point.
+        // So we can read the dirty count, save, then subtract.
+        let current_dirty = self.dirty_count.load(Ordering::Relaxed);
+
+        save_bincode(&self.storage_path.join("uri_mappings.bin"), &mappings)?;
+
+        if current_dirty > 0 {
+            let _ = self.dirty_count.fetch_sub(current_dirty, Ordering::Relaxed);
+        }
+        Ok(())
+    }
+
+    /// Force save all data to disk
+    pub fn flush(&self) -> Result<()> {
+        self.save_mappings()?;
+        if let Some(ref vs) = self.vector_store {
+            vs.flush()?;
+        }
         Ok(())
     }
 
@@ -104,16 +146,14 @@ impl SynapseStore {
         uri_map.insert(uri.to_string(), id);
         id_map.insert(id, uri.to_string());
 
-        // Prepare mappings for persistence
-        let mappings = UriMappings {
-            uri_to_id: uri_map.clone(),
-            next_id: self.next_id.load(std::sync::atomic::Ordering::Relaxed),
-        };
-
-        // Persist mappings (best effort, don't block on error)
         drop(uri_map);
         drop(id_map);
-        let _ = self.save_mappings(mappings);
+
+        // Check if we need to auto-save mappings
+        let count = self.dirty_count.fetch_add(1, Ordering::Relaxed);
+        if count + 1 >= self.save_threshold {
+            let _ = self.save_mappings();
+        }
 
         id
     }
@@ -122,41 +162,58 @@ impl SynapseStore {
         self.id_to_uri.read().unwrap().get(&id).cloned()
     }
 
-    pub async fn ingest_triples(
-        &self,
-        triples: Vec<IngestTriple>,
-    ) -> Result<(u32, u32)> {
+    pub async fn ingest_triples(&self, triples: Vec<IngestTriple>) -> Result<(u32, u32)> {
         let mut added = 0;
 
         // Group by provenance to optimize batch insertion into named graphs
-        let mut batches: HashMap<Option<Provenance>, Vec<(String, String, String)>> = HashMap::new();
+        let mut batches: HashMap<Option<Provenance>, Vec<(String, String, String)>> =
+            HashMap::new();
 
         for t in triples {
-            batches.entry(t.provenance).or_default().push((t.subject, t.predicate, t.object));
+            batches
+                .entry(t.provenance)
+                .or_default()
+                .push((t.subject, t.predicate, t.object));
         }
 
         for (prov, batch_triples) in batches {
-             let graph_name = if let Some(p) = &prov {
-                 let uuid = Uuid::new_v4();
-                 let uri = format!("urn:batch:{}", uuid);
+            let graph_name = if let Some(p) = &prov {
+                let uuid = Uuid::new_v4();
+                let uri = format!("urn:batch:{}", uuid);
 
-                 let batch_node = NamedNode::new_unchecked(&uri);
-                 let p_derived = NamedNode::new_unchecked("http://www.w3.org/ns/prov#wasDerivedFrom");
-                 let p_time = NamedNode::new_unchecked("http://www.w3.org/ns/prov#generatedAtTime");
-                 let p_method = NamedNode::new_unchecked("http://www.w3.org/ns/prov#wasGeneratedBy");
+                let batch_node = NamedNode::new_unchecked(&uri);
+                let p_derived =
+                    NamedNode::new_unchecked("http://www.w3.org/ns/prov#wasDerivedFrom");
+                let p_time = NamedNode::new_unchecked("http://www.w3.org/ns/prov#generatedAtTime");
+                let p_method = NamedNode::new_unchecked("http://www.w3.org/ns/prov#wasGeneratedBy");
 
-                 let o_source = Literal::new_simple_literal(&p.source);
-                 let o_time = Literal::new_simple_literal(&p.timestamp);
-                 let o_method = Literal::new_simple_literal(&p.method);
+                let o_source = Literal::new_simple_literal(&p.source);
+                let o_time = Literal::new_simple_literal(&p.timestamp);
+                let o_method = Literal::new_simple_literal(&p.method);
 
-                 self.store.insert(&Quad::new(batch_node.clone(), p_derived, o_source, GraphName::DefaultGraph))?;
-                 self.store.insert(&Quad::new(batch_node.clone(), p_time, o_time, GraphName::DefaultGraph))?;
-                 self.store.insert(&Quad::new(batch_node.clone(), p_method, o_method, GraphName::DefaultGraph))?;
+                self.store.insert(&Quad::new(
+                    batch_node.clone(),
+                    p_derived,
+                    o_source,
+                    GraphName::DefaultGraph,
+                ))?;
+                self.store.insert(&Quad::new(
+                    batch_node.clone(),
+                    p_time,
+                    o_time,
+                    GraphName::DefaultGraph,
+                ))?;
+                self.store.insert(&Quad::new(
+                    batch_node.clone(),
+                    p_method,
+                    o_method,
+                    GraphName::DefaultGraph,
+                ))?;
 
-                 GraphName::NamedNode(batch_node)
-             } else {
-                 GraphName::DefaultGraph
-             };
+                GraphName::NamedNode(batch_node)
+            } else {
+                GraphName::DefaultGraph
+            };
 
             for (s, p, o) in batch_triples {
                 let subject_uri = self.ensure_uri(&s);
@@ -258,18 +315,17 @@ impl SynapseStore {
         let subject = NamedNodeRef::new(start_uri).ok();
 
         if let Some(subj) = subject {
-            for quad in self
+            for q in self
                 .store
                 .quads_for_pattern(Some(subj.into()), None, None, None)
+                .flatten()
             {
-                if let Ok(q) = quad {
-                    expanded.push(q.object.to_string());
+                expanded.push(q.object.to_string());
 
-                    // Recursive expansion (simplified, depth-1)
-                    if depth > 1 {
-                        let nested = self.expand_graph(&q.object.to_string(), depth - 1)?;
-                        expanded.extend(nested);
-                    }
+                // Recursive expansion (simplified, depth-1)
+                if depth > 1 {
+                    let nested = self.expand_graph(&q.object.to_string(), depth - 1)?;
+                    expanded.extend(nested);
                 }
             }
         }
@@ -305,9 +361,15 @@ impl SynapseStore {
     pub fn get_degree(&self, uri: &str) -> usize {
         let node = NamedNodeRef::new(uri).ok();
         if let Some(n) = node {
-             let outgoing = self.store.quads_for_pattern(Some(n.into()), None, None, None).count();
-             let incoming = self.store.quads_for_pattern(None, None, Some(n.into()), None).count();
-             outgoing + incoming
+            let outgoing = self
+                .store
+                .quads_for_pattern(Some(n.into()), None, None, None)
+                .count();
+            let incoming = self
+                .store
+                .quads_for_pattern(None, None, Some(n.into()), None)
+                .count();
+            outgoing + incoming
         } else {
             0
         }

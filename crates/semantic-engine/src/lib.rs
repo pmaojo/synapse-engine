@@ -4,6 +4,7 @@ pub mod disambiguation;
 pub mod ingest;
 pub mod mcp_stdio;
 pub mod mcp_types;
+pub mod persistence;
 pub mod processor;
 pub mod reasoner;
 pub mod server;

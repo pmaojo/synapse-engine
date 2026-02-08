@@ -1,6 +1,4 @@
 /// Entity disambiguation using string similarity and graph context
-
-/// Entity disambiguation using string similarity and graph context
 pub struct EntityDisambiguator {
     /// Similarity threshold (0.0 - 1.0)
     threshold: f64,
