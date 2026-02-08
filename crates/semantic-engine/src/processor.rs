@@ -17,40 +17,40 @@ impl TextProcessor {
         let mut chunks = Vec::new();
         // Simple approach: Split by whitespace to preserve words
         let words: Vec<&str> = text.split_inclusive(char::is_whitespace).collect();
-        
+
         let mut current_chunk = String::new();
         let mut current_len = 0;
         let mut current_words: Vec<&str> = Vec::new();
 
         for word in words {
-             if current_len + word.len() > max_chars {
-                 if !current_chunk.is_empty() {
-                     chunks.push(current_chunk.trim().to_string());
-                 }
+            if current_len + word.len() > max_chars {
+                if !current_chunk.is_empty() {
+                    chunks.push(current_chunk.trim().to_string());
+                }
 
-                 // Handle overlap
-                 let mut overlap_words = Vec::new();
-                 let mut overlap_len = 0;
+                // Handle overlap
+                let mut overlap_words = Vec::new();
+                let mut overlap_len = 0;
 
-                 // Backtrack to capture overlap context
-                 for w in current_words.iter().rev() {
-                     if overlap_len + w.len() <= overlap {
-                         overlap_words.push(*w);
-                         overlap_len += w.len();
-                     } else {
-                         break;
-                     }
-                 }
-                 overlap_words.reverse();
+                // Backtrack to capture overlap context
+                for w in current_words.iter().rev() {
+                    if overlap_len + w.len() <= overlap {
+                        overlap_words.push(*w);
+                        overlap_len += w.len();
+                    } else {
+                        break;
+                    }
+                }
+                overlap_words.reverse();
 
-                 current_chunk = overlap_words.concat();
-                 current_len = overlap_len;
-                 current_words = overlap_words;
-             }
+                current_chunk = overlap_words.concat();
+                current_len = overlap_len;
+                current_words = overlap_words;
+            }
 
-             current_chunk.push_str(word);
-             current_len += word.len();
-             current_words.push(word);
+            current_chunk.push_str(word);
+            current_len += word.len();
+            current_words.push(word);
         }
 
         if !current_chunk.is_empty() {

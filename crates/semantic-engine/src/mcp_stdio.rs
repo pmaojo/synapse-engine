@@ -310,10 +310,7 @@ impl McpStdioServer {
         if let Some(tool) = tools.iter().find(|t| t.name == tool_name) {
             if let Ok(schema) = JSONSchema::compile(&tool.input_schema) {
                 if let Err(errors) = schema.validate(arguments) {
-                    let error_msg = errors
-                        .map(|e| e.to_string())
-                        .collect::<Vec<_>>()
-                        .join(", ");
+                    let error_msg = errors.map(|e| e.to_string()).collect::<Vec<_>>().join(", ");
                     return Err(format!("Validation error: {}", error_msg));
                 }
             } else {
@@ -798,7 +795,7 @@ impl McpStdioServer {
 
         // Chunk text with overlap
         let processor = crate::processor::TextProcessor::new();
-        let chunks = processor.chunk_text(&content, 1000, 150);
+        let chunks = processor.chunk_text(content, 1000, 150);
 
         // Add to vector store
         let store = match self.engine.get_store(namespace) {

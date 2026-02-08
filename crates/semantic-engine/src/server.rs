@@ -12,7 +12,7 @@ use proto::*;
 use crate::ingest::IngestionEngine;
 use crate::reasoner::{ReasoningStrategy as InternalStrategy, SynapseReasoner};
 use crate::server::proto::{ReasoningStrategy, SearchMode};
-use crate::store::{SynapseStore, IngestTriple};
+use crate::store::{IngestTriple, SynapseStore};
 use std::path::Path;
 
 use crate::audit::InferenceAudit;
@@ -21,11 +21,15 @@ use crate::auth::NamespaceAuth;
 #[derive(Clone)]
 pub struct AuthToken(pub String);
 
+#[allow(clippy::result_large_err)]
 pub fn auth_interceptor(mut req: Request<()>) -> Result<Request<()>, Status> {
-    if let Some(token) = req.metadata().get("authorization")
+    if let Some(token) = req
+        .metadata()
+        .get("authorization")
         .and_then(|t| t.to_str().ok())
-        .map(|s| s.trim_start_matches("Bearer ").to_string()) {
-            req.extensions_mut().insert(AuthToken(token));
+        .map(|s| s.trim_start_matches("Bearer ").to_string())
+    {
+        req.extensions_mut().insert(AuthToken(token));
     }
     Ok(req)
 }
@@ -34,14 +38,16 @@ fn get_token<T>(req: &Request<T>) -> Option<String> {
     if let Some(token) = req.extensions().get::<AuthToken>() {
         return Some(token.0.clone());
     }
-    req.metadata().get("authorization")
-       .and_then(|t| t.to_str().ok())
-       .map(|s| s.trim_start_matches("Bearer ").to_string())
+    req.metadata()
+        .get("authorization")
+        .and_then(|t| t.to_str().ok())
+        .map(|s| s.trim_start_matches("Bearer ").to_string())
 }
 
+#[derive(Clone)]
 pub struct MySemanticEngine {
     pub storage_path: String,
-    pub stores: DashMap<String, Arc<SynapseStore>>,
+    pub stores: Arc<DashMap<String, Arc<SynapseStore>>>,
     pub auth: Arc<NamespaceAuth>,
     pub audit: Arc<InferenceAudit>,
 }
@@ -53,12 +59,24 @@ impl MySemanticEngine {
 
         Self {
             storage_path: storage_path.to_string(),
-            stores: DashMap::new(),
+            stores: Arc::new(DashMap::new()),
             auth,
             audit: Arc::new(InferenceAudit::new()),
         }
     }
 
+    pub async fn shutdown(&self) {
+        eprintln!("Shutting down... flushing {} stores", self.stores.len());
+        for entry in self.stores.iter() {
+            let store = entry.value();
+            if let Err(e) = store.flush() {
+                eprintln!("Failed to flush store '{}': {}", entry.key(), e);
+            }
+        }
+        eprintln!("Shutdown complete.");
+    }
+
+    #[allow(clippy::result_large_err)]
     pub fn get_store(&self, namespace: &str) -> Result<Arc<SynapseStore>, Status> {
         if let Some(store) = self.stores.get(namespace) {
             return Ok(store.clone());
@@ -151,10 +169,14 @@ impl SemanticEngine for MySemanticEngine {
         // Adding it now for consistency as we are touching auth.
         let token = get_token(&request);
         let req = request.into_inner();
-        let namespace = if req.namespace.is_empty() { "default" } else { &req.namespace };
+        let namespace = if req.namespace.is_empty() {
+            "default"
+        } else {
+            &req.namespace
+        };
 
         if let Err(e) = self.auth.check(token.as_deref(), namespace, "write") {
-             return Err(Status::permission_denied(e));
+            return Err(Status::permission_denied(e));
         }
         let store = self.get_store(namespace)?;
 
@@ -259,22 +281,34 @@ impl SemanticEngine for MySemanticEngine {
 
                                 // Node Type Filter Logic
                                 if let Some(type_filter) = node_type_filter {
-                                    let passed = if let oxigraph::model::Term::NamedNode(ref n) = obj_term {
-                                        let rdf_type = oxigraph::model::NamedNodeRef::new("http://www.w3.org/1999/02/22-rdf-syntax-ns#type").unwrap();
-                                        if let Ok(target_type) = oxigraph::model::NamedNodeRef::new(type_filter) {
-                                            store.store.quads_for_pattern(
-                                                Some(n.into()),
-                                                Some(rdf_type.into()),
-                                                Some(target_type.into()),
-                                                None
-                                            ).next().is_some()
+                                    let passed =
+                                        if let oxigraph::model::Term::NamedNode(ref n) = obj_term {
+                                            let rdf_type = oxigraph::model::NamedNodeRef::new(
+                                                "http://www.w3.org/1999/02/22-rdf-syntax-ns#type",
+                                            )
+                                            .unwrap();
+                                            if let Ok(target_type) =
+                                                oxigraph::model::NamedNodeRef::new(type_filter)
+                                            {
+                                                store
+                                                    .store
+                                                    .quads_for_pattern(
+                                                        Some(n.into()),
+                                                        Some(rdf_type),
+                                                        Some(target_type.into()),
+                                                        None,
+                                                    )
+                                                    .next()
+                                                    .is_some()
+                                            } else {
+                                                false
+                                            }
                                         } else {
                                             false
-                                        }
-                                    } else {
-                                        false
-                                    };
-                                    if !passed { continue; }
+                                        };
+                                    if !passed {
+                                        continue;
+                                    }
                                 }
 
                                 let clean_uri = match &obj_term {
@@ -291,7 +325,7 @@ impl SemanticEngine for MySemanticEngine {
                                         let degree = store.get_degree(clean_uri);
                                         // Penalize if degree > 1
                                         if degree > 1 {
-                                             neighbor_score /= (degree as f32).ln().max(1.0);
+                                            neighbor_score /= (degree as f32).ln().max(1.0);
                                         }
                                     }
 
@@ -335,22 +369,35 @@ impl SemanticEngine for MySemanticEngine {
 
                                 // Node Type Filter Logic
                                 if let Some(type_filter) = node_type_filter {
-                                    let passed = if let oxigraph::model::Subject::NamedNode(ref n) = subj_term {
-                                        let rdf_type = oxigraph::model::NamedNodeRef::new("http://www.w3.org/1999/02/22-rdf-syntax-ns#type").unwrap();
-                                        if let Ok(target_type) = oxigraph::model::NamedNodeRef::new(type_filter) {
-                                            store.store.quads_for_pattern(
-                                                Some(n.into()),
-                                                Some(rdf_type.into()),
-                                                Some(target_type.into()),
-                                                None
-                                            ).next().is_some()
+                                    let passed = if let oxigraph::model::Subject::NamedNode(ref n) =
+                                        subj_term
+                                    {
+                                        let rdf_type = oxigraph::model::NamedNodeRef::new(
+                                            "http://www.w3.org/1999/02/22-rdf-syntax-ns#type",
+                                        )
+                                        .unwrap();
+                                        if let Ok(target_type) =
+                                            oxigraph::model::NamedNodeRef::new(type_filter)
+                                        {
+                                            store
+                                                .store
+                                                .quads_for_pattern(
+                                                    Some(n.into()),
+                                                    Some(rdf_type),
+                                                    Some(target_type.into()),
+                                                    None,
+                                                )
+                                                .next()
+                                                .is_some()
                                         } else {
                                             false
                                         }
                                     } else {
                                         false
                                     };
-                                    if !passed { continue; }
+                                    if !passed {
+                                        continue;
+                                    }
                                 }
 
                                 let clean_uri = match &subj_term {
@@ -367,7 +414,7 @@ impl SemanticEngine for MySemanticEngine {
                                         let degree = store.get_degree(clean_uri);
                                         // Penalize if degree > 1
                                         if degree > 1 {
-                                             neighbor_score /= (degree as f32).ln().max(1.0);
+                                            neighbor_score /= (degree as f32).ln().max(1.0);
                                         }
                                     }
 
@@ -503,9 +550,21 @@ impl SemanticEngine for MySemanticEngine {
             let o = quad.object.to_string();
 
             // Clean up NTriples formatting (<uri> -> uri)
-            let clean_s = if s.starts_with('<') && s.ends_with('>') { s[1..s.len()-1].to_string() } else { s };
-            let clean_p = if p.starts_with('<') && p.ends_with('>') { p[1..p.len()-1].to_string() } else { p };
-            let clean_o = if o.starts_with('<') && o.ends_with('>') { o[1..o.len()-1].to_string() } else { o };
+            let clean_s = if s.starts_with('<') && s.ends_with('>') {
+                s[1..s.len() - 1].to_string()
+            } else {
+                s
+            };
+            let clean_p = if p.starts_with('<') && p.ends_with('>') {
+                p[1..p.len() - 1].to_string()
+            } else {
+                p
+            };
+            let clean_o = if o.starts_with('<') && o.ends_with('>') {
+                o[1..o.len() - 1].to_string()
+            } else {
+                o
+            };
 
             triples.push(Triple {
                 subject: clean_s,
