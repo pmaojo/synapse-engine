@@ -47,9 +47,9 @@ impl SynapseReasoner {
                             {
                                 if let Term::NamedNode(c) = q2.object {
                                     inferred.push((
-                                        a.to_string(),
-                                        subclass_prop.to_string(),
-                                        c.to_string(),
+                                        a.as_str().to_string(),
+                                        subclass_prop.as_str().to_string(),
+                                        c.as_str().to_string(),
                                     ));
                                 }
                             }
@@ -82,22 +82,26 @@ impl SynapseReasoner {
                             .quads_for_pattern(None, Some(p_ref), None, None)
                             .flatten()
                         {
-                            if let Term::NamedNode(y) = xy_quad.object {
-                                // Find y p z ("yz")
-                                for yz_quad in store
-                                    .quads_for_pattern(
-                                        Some(y.as_ref().into()),
-                                        Some(p_ref),
-                                        None,
-                                        None,
-                                    )
-                                    .flatten()
-                                {
-                                    inferred.push((
-                                        xy_quad.subject.to_string(),
-                                        p_node.to_string(),
-                                        yz_quad.object.to_string(),
-                                    ));
+                            if let Subject::NamedNode(x) = xy_quad.subject {
+                                if let Term::NamedNode(y) = xy_quad.object {
+                                    // Find y p z ("yz")
+                                    for yz_quad in store
+                                        .quads_for_pattern(
+                                            Some(y.as_ref().into()),
+                                            Some(p_ref),
+                                            None,
+                                            None,
+                                        )
+                                        .flatten()
+                                    {
+                                        if let Term::NamedNode(z) = yz_quad.object {
+                                            inferred.push((
+                                                x.as_str().to_string(),
+                                                p_node.as_str().to_string(),
+                                                z.as_str().to_string(),
+                                            ));
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -126,11 +130,14 @@ impl SynapseReasoner {
                             .flatten()
                         {
                             // Infer: y p x
-                            if let Term::NamedNode(obj_node) = e.object {
-                                let s_str = e.subject.to_string();
-                                let p_str = p_node.to_string();
-                                let o_str = obj_node.to_string();
-                                inferred.push((o_str, p_str, s_str));
+                            if let Subject::NamedNode(s_node) = e.subject {
+                                if let Term::NamedNode(obj_node) = e.object {
+                                    inferred.push((
+                                        obj_node.as_str().to_string(),
+                                        p_node.as_str().to_string(),
+                                        s_node.as_str().to_string(),
+                                    ));
+                                }
                             }
                         }
                     }
@@ -152,12 +159,14 @@ impl SynapseReasoner {
                                 .quads_for_pattern(None, Some(p1_ref), None, None)
                                 .flatten()
                             {
-                                if let Term::NamedNode(y) = e.object {
-                                    inferred.push((
-                                        y.to_string(),
-                                        p2_node.to_string(),
-                                        e.subject.to_string(),
-                                    ));
+                                if let Subject::NamedNode(x) = e.subject {
+                                    if let Term::NamedNode(y) = e.object {
+                                        inferred.push((
+                                            y.as_str().to_string(),
+                                            p2_node.as_str().to_string(),
+                                            x.as_str().to_string(),
+                                        ));
+                                    }
                                 }
                             }
                         }
@@ -210,7 +219,6 @@ impl SynapseReasoner {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use oxigraph::model::Literal;
 
     #[test]
     fn test_rdfs_transitivity() -> Result<()> {
@@ -237,7 +245,11 @@ mod tests {
 
         let inferred = reasoner.apply(&store)?;
         assert!(!inferred.is_empty());
-        assert!(inferred.contains(&(a.to_string(), sub_class_of.to_string(), c.to_string())));
+        assert!(inferred.contains(&(
+            a.as_str().to_string(),
+            sub_class_of.as_str().to_string(),
+            c.as_str().to_string()
+        )));
 
         Ok(())
     }
@@ -279,7 +291,11 @@ mod tests {
         ))?;
 
         let inferred = reasoner.apply(&store)?;
-        assert!(inferred.contains(&(x.to_string(), p.to_string(), z.to_string())));
+        assert!(inferred.contains(&(
+            x.as_str().to_string(),
+            p.as_str().to_string(),
+            z.as_str().to_string()
+        )));
 
         Ok(())
     }
