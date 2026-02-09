@@ -1,3 +1,4 @@
+use crate::persistence::{load_bincode, save_bincode};
 use anyhow::Result;
 use hnsw::Hnsw;
 use rand_pcg::Pcg64;
@@ -5,11 +6,13 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 
 const HUGGINGFACE_API_URL: &str = "https://router.huggingface.co/hf-inference/models";
 const DEFAULT_MODEL: &str = "sentence-transformers/all-MiniLM-L6-v2"; // 384 dims, fast
 const DEFAULT_DIMENSIONS: usize = 384;
+const DEFAULT_AUTO_SAVE_THRESHOLD: usize = 100;
 
 /// Euclidean distance metric for HNSW
 #[derive(Default, Clone)]
@@ -67,6 +70,10 @@ pub struct VectorStore {
     dimensions: usize,
     /// Stored embeddings for persistence
     embeddings: Arc<RwLock<Vec<VectorEntry>>>,
+    /// Number of unsaved changes
+    dirty_count: Arc<AtomicUsize>,
+    /// Threshold for auto-save
+    auto_save_threshold: usize,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -93,7 +100,7 @@ impl VectorStore {
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(DEFAULT_DIMENSIONS);
-        
+
         // Create HNSW index with Euclidian metric
         let mut index = Hnsw::new(Euclidian);
         let mut id_to_key = HashMap::new();
@@ -103,49 +110,68 @@ impl VectorStore {
 
         // Try to load persisted vectors
         if let Some(ref path) = storage_path {
-            let vectors_path = path.join("vectors.json");
-            if vectors_path.exists() {
-                if let Ok(content) = std::fs::read_to_string(&vectors_path) {
+            let vectors_bin = path.join("vectors.bin");
+            let vectors_json = path.join("vectors.json");
+
+            let loaded_data = if vectors_bin.exists() {
+                load_bincode::<VectorData>(&vectors_bin).ok()
+            } else if vectors_json.exists() {
+                // Fallback / Migration from JSON
+                let content = std::fs::read_to_string(&vectors_json).ok();
+                if let Some(content) = content {
                     // Try new format first
                     if let Ok(data) = serde_json::from_str::<VectorData>(&content) {
-                        let mut searcher = hnsw::Searcher::default();
-                        for entry in data.entries {
-                            if entry.embedding.len() == dimensions {
-                                let id = index.insert(entry.embedding.clone(), &mut searcher);
-                                id_to_key.insert(id, entry.key.clone());
-                                key_to_id.insert(entry.key.clone(), id);
-                                key_to_metadata.insert(entry.key.clone(), entry.metadata.clone());
-                                embeddings.push(entry);
-                            }
-                        }
-                        eprintln!("Loaded {} vectors from disk (dim={})", embeddings.len(), dimensions);
+                        Some(data)
                     } else {
-                        // Fallback: Try loading old format (VectorEntry with 'uri' instead of 'key')
+                        // Fallback: Try loading old format
                         #[derive(Serialize, Deserialize)]
-                        struct OldVectorData { entries: Vec<OldVectorEntry> }
+                        struct OldVectorData {
+                            entries: Vec<OldVectorEntry>,
+                        }
                         #[derive(Serialize, Deserialize)]
-                        struct OldVectorEntry { uri: String, embedding: Vec<f32> }
+                        struct OldVectorEntry {
+                            uri: String,
+                            embedding: Vec<f32>,
+                        }
 
                         if let Ok(old_data) = serde_json::from_str::<OldVectorData>(&content) {
-                             let mut searcher = hnsw::Searcher::default();
-                             for old in old_data.entries {
-                                 if old.embedding.len() == dimensions {
-                                     let id = index.insert(old.embedding.clone(), &mut searcher);
-                                     id_to_key.insert(id, old.uri.clone());
-                                     key_to_id.insert(old.uri.clone(), id);
-                                     let metadata = serde_json::json!({ "uri": old.uri });
-                                     key_to_metadata.insert(old.uri.clone(), metadata.clone());
-                                     embeddings.push(VectorEntry {
-                                         key: old.uri.clone(),
-                                         embedding: old.embedding,
-                                         metadata,
-                                     });
-                                 }
-                             }
-                             eprintln!("Loaded {} legacy vectors from disk (dim={})", embeddings.len(), dimensions);
+                            let entries = old_data
+                                .entries
+                                .into_iter()
+                                .map(|old| VectorEntry {
+                                    key: old.uri.clone(),
+                                    embedding: old.embedding,
+                                    metadata: serde_json::json!({ "uri": old.uri }),
+                                })
+                                .collect();
+                            Some(VectorData { entries })
+                        } else {
+                            None
                         }
                     }
+                } else {
+                    None
                 }
+            } else {
+                None
+            };
+
+            if let Some(data) = loaded_data {
+                let mut searcher = hnsw::Searcher::default();
+                for entry in data.entries {
+                    if entry.embedding.len() == dimensions {
+                        let id = index.insert(entry.embedding.clone(), &mut searcher);
+                        id_to_key.insert(id, entry.key.clone());
+                        key_to_id.insert(entry.key.clone(), id);
+                        key_to_metadata.insert(entry.key.clone(), entry.metadata.clone());
+                        embeddings.push(entry);
+                    }
+                }
+                eprintln!(
+                    "Loaded {} vectors from disk (dim={})",
+                    embeddings.len(),
+                    dimensions
+                );
             }
         }
 
@@ -169,6 +195,8 @@ impl VectorStore {
             model: DEFAULT_MODEL.to_string(),
             dimensions,
             embeddings: Arc::new(RwLock::new(embeddings)),
+            dirty_count: Arc::new(AtomicUsize::new(0)),
+            auto_save_threshold: DEFAULT_AUTO_SAVE_THRESHOLD,
         })
     }
 
@@ -176,13 +204,46 @@ impl VectorStore {
     fn save_vectors(&self) -> Result<()> {
         if let Some(ref path) = self.storage_path {
             std::fs::create_dir_all(path)?;
-            let data = VectorData {
-                entries: self.embeddings.read().unwrap().clone(),
+
+            // Hold read lock during serialization AND dirty count reset to avoid race condition.
+            // Wait, we need to read the dirty count at the time of snapshot.
+            // But we can't atomically read-and-subtract without a loop if we don't hold a write lock on dirty_count (which is Atomic).
+            // Actually, if we just subtract the value we *saw* before starting the save, new items added during save will just remain in the counter.
+            // But we are saving the *entire* vector list, so any items added during save (if that were possible with the lock held) would be included?
+            // `embeddings` is protected by RwLock.
+            // We take a read lock on `embeddings` to clone/serialize.
+            // While we hold the read lock, NO new items can be added (add_batch needs write lock).
+            // So the snapshot is consistent.
+            // The race happens *after* we drop the read lock and *before* we reset dirty_count.
+            // During that window, a writer could add items and increment dirty_count.
+            // If we then reset to 0, we lose those counts.
+            //
+            // Fix: Read dirty_count *while holding the read lock*.
+            // Since writers are blocked, dirty_count cannot change while we hold the lock.
+            // So `current_dirty` will be exactly the number of unsaved items included in `entries`.
+            // Then we perform the save (IO).
+            // Finally we subtract `current_dirty`.
+            // If new items come in during IO (after read lock drop), they increment counter.
+            // Subtracting `current_dirty` leaves those new increments intact. Correct.
+
+            let (entries, current_dirty) = {
+                let guard = self.embeddings.read().unwrap();
+                (guard.clone(), self.dirty_count.load(Ordering::Relaxed))
             };
-            let content = serde_json::to_string(&data)?;
-            std::fs::write(path.join("vectors.json"), content)?;
+
+            let data = VectorData { entries };
+            save_bincode(&path.join("vectors.bin"), &data)?;
+
+            if current_dirty > 0 {
+                let _ = self.dirty_count.fetch_sub(current_dirty, Ordering::Relaxed);
+            }
         }
         Ok(())
+    }
+
+    /// Force save to disk
+    pub fn flush(&self) -> Result<()> {
+        self.save_vectors()
     }
 
     /// Generate embedding for a text using HuggingFace Inference API
@@ -207,14 +268,14 @@ impl VectorStore {
         }
 
         if std::env::var("MOCK_EMBEDDINGS").is_ok() {
-             use rand::Rng;
-             let mut rng = rand::rng();
-             let mut results = Vec::new();
-             for _ in 0..texts.len() {
-                 let vec: Vec<f32> = (0..self.dimensions).map(|_| rng.random()).collect();
-                 results.push(vec);
-             }
-             return Ok(results);
+            use rand::Rng;
+            let mut rng = rand::rng();
+            let mut results = Vec::new();
+            for _ in 0..texts.len() {
+                let vec: Vec<f32> = (0..self.dimensions).map(|_| rng.random()).collect();
+                results.push(vec);
+            }
+            return Ok(results);
         }
 
         let url = format!(
@@ -271,13 +332,23 @@ impl VectorStore {
     }
 
     /// Add a key with its text content to the index
-    pub async fn add(&self, key: &str, content: &str, metadata: serde_json::Value) -> Result<usize> {
-        let results = self.add_batch(vec![(key.to_string(), content.to_string(), metadata)]).await?;
+    pub async fn add(
+        &self,
+        key: &str,
+        content: &str,
+        metadata: serde_json::Value,
+    ) -> Result<usize> {
+        let results = self
+            .add_batch(vec![(key.to_string(), content.to_string(), metadata)])
+            .await?;
         Ok(results[0])
     }
 
     /// Add multiple keys with their text content to the index
-    pub async fn add_batch(&self, items: Vec<(String, String, serde_json::Value)>) -> Result<Vec<usize>> {
+    pub async fn add_batch(
+        &self,
+        items: Vec<(String, String, serde_json::Value)>,
+    ) -> Result<Vec<usize>> {
         // Filter out existing keys
         let mut new_items = Vec::new();
         let mut result_ids = vec![0; items.len()];
@@ -330,7 +401,7 @@ impl VectorStore {
 
                 embs.push(VectorEntry {
                     key: key.clone(),
-                    embedding: embedding,
+                    embedding,
                     metadata: metadata.clone(),
                 });
 
@@ -340,7 +411,12 @@ impl VectorStore {
         }
 
         if !ids_to_add.is_empty() {
-            let _ = self.save_vectors(); // Best effort persistence
+            let count = self
+                .dirty_count
+                .fetch_add(ids_to_add.len(), Ordering::Relaxed);
+            if count + ids_to_add.len() >= self.auto_save_threshold {
+                let _ = self.save_vectors();
+            }
         }
 
         Ok(result_ids)
@@ -376,9 +452,16 @@ impl VectorStore {
                 id_map.get(&neighbor.index).map(|key| {
                     let score_f32 = (neighbor.distance as f32) / 1_000_000.0;
 
-                    let metadata = metadata_map.get(key).cloned().unwrap_or(serde_json::Value::Null);
+                    let metadata = metadata_map
+                        .get(key)
+                        .cloned()
+                        .unwrap_or(serde_json::Value::Null);
 
-                    let uri = metadata.get("uri").and_then(|v| v.as_str()).unwrap_or(key).to_string();
+                    let uri = metadata
+                        .get("uri")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or(key)
+                        .to_string();
 
                     SearchResult {
                         key: key.clone(),
@@ -412,8 +495,9 @@ impl VectorStore {
     /// Compaction: rebuild index from stored embeddings, removing stale entries
     pub fn compact(&self) -> Result<usize> {
         let embeddings = self.embeddings.read().unwrap();
-        let current_keys: std::collections::HashSet<_> = self.key_to_id.read().unwrap().keys().cloned().collect();
-        
+        let current_keys: std::collections::HashSet<_> =
+            self.key_to_id.read().unwrap().keys().cloned().collect();
+
         if current_keys.is_empty() && !embeddings.is_empty() {
             return Ok(0);
         }
