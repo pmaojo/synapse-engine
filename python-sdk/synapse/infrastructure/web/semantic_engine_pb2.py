@@ -24,17 +24,17 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x15semantic_engine.proto\x12\x0fsemantic_engine\"1\n\rSparqlRequest\x12\r\n\x05query\x18\x01 \x01(\t\x12\x11\n\tnamespace\x18\x02 \x01(\t\"&\n\x0eSparqlResponse\x12\x14\n\x0cresults_json\x18\x01 \x01(\t\"2\n\x0e\x44\x65leteResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08\x12\x0f\n\x07message\x18\x02 \x01(\t\"?\n\nProvenance\x12\x0e\n\x06source\x18\x01 \x01(\t\x12\x11\n\ttimestamp\x18\x02 \x01(\t\x12\x0e\n\x06method\x18\x03 \x01(\t\"\x80\x01\n\x06Triple\x12\x0f\n\x07subject\x18\x01 \x01(\t\x12\x11\n\tpredicate\x18\x02 \x01(\t\x12\x0e\n\x06object\x18\x03 \x01(\t\x12/\n\nprovenance\x18\x04 \x01(\x0b\x32\x1b.semantic_engine.Provenance\x12\x11\n\tembedding\x18\x05 \x03(\x02\"L\n\rIngestRequest\x12(\n\x07triples\x18\x01 \x03(\x0b\x32\x17.semantic_engine.Triple\x12\x11\n\tnamespace\x18\x02 \x01(\t\"9\n\x11IngestFileRequest\x12\x11\n\tfile_path\x18\x01 \x01(\t\x12\x11\n\tnamespace\x18\x02 \x01(\t\":\n\x0eIngestResponse\x12\x13\n\x0bnodes_added\x18\x01 \x01(\r\x12\x13\n\x0b\x65\x64ges_added\x18\x02 \x01(\r\"1\n\x0bNodeRequest\x12\x0f\n\x07node_id\x18\x01 \x01(\r\x12\x11\n\tnamespace\x18\x02 \x01(\t\"@\n\x10NeighborResponse\x12,\n\tneighbors\x18\x01 \x03(\x0b\x32\x19.semantic_engine.Neighbor\".\n\x08Neighbor\x12\x0f\n\x07node_id\x18\x01 \x01(\r\x12\x11\n\tedge_type\x18\x02 \x01(\t\"@\n\rSearchRequest\x12\r\n\x05query\x18\x01 \x01(\t\x12\r\n\x05limit\x18\x02 \x01(\r\x12\x11\n\tnamespace\x18\x03 \x01(\t\"@\n\x0eSearchResponse\x12.\n\x07results\x18\x01 \x03(\x0b\x32\x1d.semantic_engine.SearchResult\"L\n\x0cSearchResult\x12\x0f\n\x07node_id\x18\x01 \x01(\r\x12\r\n\x05score\x18\x02 \x01(\x02\x12\x0f\n\x07\x63ontent\x18\x03 \x01(\t\x12\x0b\n\x03uri\x18\x04 \x01(\t\"\x98\x01\n\x13HybridSearchRequest\x12\r\n\x05query\x18\x01 \x01(\t\x12\x11\n\tnamespace\x18\x02 \x01(\t\x12\x10\n\x08vector_k\x18\x03 \x01(\r\x12\x13\n\x0bgraph_depth\x18\x04 \x01(\r\x12)\n\x04mode\x18\x05 \x01(\x0e\x32\x1b.semantic_engine.SearchMode\x12\r\n\x05limit\x18\x06 \x01(\r\"4\n\x0eResolveRequest\x12\x0f\n\x07\x63ontent\x18\x01 \x01(\t\x12\x11\n\tnamespace\x18\x02 \x01(\t\"1\n\x0fResolveResponse\x12\x0f\n\x07node_id\x18\x01 \x01(\r\x12\r\n\x05\x66ound\x18\x02 \x01(\x08\"!\n\x0c\x45mptyRequest\x12\x11\n\tnamespace\x18\x01 \x01(\t\";\n\x0fTriplesResponse\x12(\n\x07triples\x18\x01 \x03(\x0b\x32\x17.semantic_engine.Triple\"p\n\x10ReasoningRequest\x12\x11\n\tnamespace\x18\x01 \x01(\t\x12\x34\n\x08strategy\x18\x02 \x01(\x0e\x32\".semantic_engine.ReasoningStrategy\x12\x13\n\x0bmaterialize\x18\x03 \x01(\x08\"O\n\x11ReasoningResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08\x12\x18\n\x10triples_inferred\x18\x02 \x01(\r\x12\x0f\n\x07message\x18\x03 \x01(\t*9\n\nSearchMode\x12\x0f\n\x0bVECTOR_ONLY\x10\x00\x12\x0e\n\nGRAPH_ONLY\x10\x01\x12\n\n\x06HYBRID\x10\x02*2\n\x11ReasoningStrategy\x12\x08\n\x04NONE\x10\x00\x12\x08\n\x04RDFS\x10\x01\x12\t\n\x05OWLRL\x10\x02\x32\xca\x06\n\x0eSemanticEngine\x12P\n\rIngestTriples\x12\x1e.semantic_engine.IngestRequest\x1a\x1f.semantic_engine.IngestResponse\x12Q\n\nIngestFile\x12\".semantic_engine.IngestFileRequest\x1a\x1f.semantic_engine.IngestResponse\x12O\n\x0cGetNeighbors\x12\x1c.semantic_engine.NodeRequest\x1a!.semantic_engine.NeighborResponse\x12I\n\x06Search\x12\x1e.semantic_engine.SearchRequest\x1a\x1f.semantic_engine.SearchResponse\x12N\n\tResolveId\x12\x1f.semantic_engine.ResolveRequest\x1a .semantic_engine.ResolveResponse\x12P\n\rGetAllTriples\x12\x1d.semantic_engine.EmptyRequest\x1a .semantic_engine.TriplesResponse\x12N\n\x0bQuerySparql\x12\x1e.semantic_engine.SparqlRequest\x1a\x1f.semantic_engine.SparqlResponse\x12U\n\x13\x44\x65leteNamespaceData\x12\x1d.semantic_engine.EmptyRequest\x1a\x1f.semantic_engine.DeleteResponse\x12U\n\x0cHybridSearch\x12$.semantic_engine.HybridSearchRequest\x1a\x1f.semantic_engine.SearchResponse\x12W\n\x0e\x41pplyReasoning\x12!.semantic_engine.ReasoningRequest\x1a\".semantic_engine.ReasoningResponseb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x15semantic_engine.proto\x12\x0fsemantic_engine\"1\n\rSparqlRequest\x12\r\n\x05query\x18\x01 \x01(\t\x12\x11\n\tnamespace\x18\x02 \x01(\t\"&\n\x0eSparqlResponse\x12\x14\n\x0cresults_json\x18\x01 \x01(\t\"2\n\x0e\x44\x65leteResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08\x12\x0f\n\x07message\x18\x02 \x01(\t\"?\n\nProvenance\x12\x0e\n\x06source\x18\x01 \x01(\t\x12\x11\n\ttimestamp\x18\x02 \x01(\t\x12\x0e\n\x06method\x18\x03 \x01(\t\"\x80\x01\n\x06Triple\x12\x0f\n\x07subject\x18\x01 \x01(\t\x12\x11\n\tpredicate\x18\x02 \x01(\t\x12\x0e\n\x06object\x18\x03 \x01(\t\x12/\n\nprovenance\x18\x04 \x01(\x0b\x32\x1b.semantic_engine.Provenance\x12\x11\n\tembedding\x18\x05 \x03(\x02\"L\n\rIngestRequest\x12(\n\x07triples\x18\x01 \x03(\x0b\x32\x17.semantic_engine.Triple\x12\x11\n\tnamespace\x18\x02 \x01(\t\"9\n\x11IngestFileRequest\x12\x11\n\tfile_path\x18\x01 \x01(\t\x12\x11\n\tnamespace\x18\x02 \x01(\t\":\n\x0eIngestResponse\x12\x13\n\x0bnodes_added\x18\x01 \x01(\r\x12\x13\n\x0b\x65\x64ges_added\x18\x02 \x01(\r\"\xb5\x01\n\x0bNodeRequest\x12\x0f\n\x07node_id\x18\x01 \x01(\r\x12\x11\n\tnamespace\x18\x02 \x01(\t\x12\x11\n\tdirection\x18\x03 \x01(\t\x12\r\n\x05\x64\x65pth\x18\x04 \x01(\r\x12\x13\n\x0b\x65\x64ge_filter\x18\x05 \x01(\t\x12\x17\n\x0flimit_per_layer\x18\x06 \x01(\r\x12\x18\n\x10scoring_strategy\x18\x07 \x01(\t\x12\x18\n\x10node_type_filter\x18\x08 \x01(\t\"@\n\x10NeighborResponse\x12,\n\tneighbors\x18\x01 \x03(\x0b\x32\x19.semantic_engine.Neighbor\"l\n\x08Neighbor\x12\x0f\n\x07node_id\x18\x01 \x01(\r\x12\x11\n\tedge_type\x18\x02 \x01(\t\x12\x0b\n\x03uri\x18\x03 \x01(\t\x12\x11\n\tdirection\x18\x04 \x01(\t\x12\r\n\x05\x64\x65pth\x18\x05 \x01(\r\x12\r\n\x05score\x18\x06 \x01(\x02\"@\n\rSearchRequest\x12\r\n\x05query\x18\x01 \x01(\t\x12\r\n\x05limit\x18\x02 \x01(\r\x12\x11\n\tnamespace\x18\x03 \x01(\t\"@\n\x0eSearchResponse\x12.\n\x07results\x18\x01 \x03(\x0b\x32\x1d.semantic_engine.SearchResult\"L\n\x0cSearchResult\x12\x0f\n\x07node_id\x18\x01 \x01(\r\x12\r\n\x05score\x18\x02 \x01(\x02\x12\x0f\n\x07\x63ontent\x18\x03 \x01(\t\x12\x0b\n\x03uri\x18\x04 \x01(\t\"\x98\x01\n\x13HybridSearchRequest\x12\r\n\x05query\x18\x01 \x01(\t\x12\x11\n\tnamespace\x18\x02 \x01(\t\x12\x10\n\x08vector_k\x18\x03 \x01(\r\x12\x13\n\x0bgraph_depth\x18\x04 \x01(\r\x12)\n\x04mode\x18\x05 \x01(\x0e\x32\x1b.semantic_engine.SearchMode\x12\r\n\x05limit\x18\x06 \x01(\r\"4\n\x0eResolveRequest\x12\x0f\n\x07\x63ontent\x18\x01 \x01(\t\x12\x11\n\tnamespace\x18\x02 \x01(\t\"1\n\x0fResolveResponse\x12\x0f\n\x07node_id\x18\x01 \x01(\r\x12\r\n\x05\x66ound\x18\x02 \x01(\x08\"!\n\x0c\x45mptyRequest\x12\x11\n\tnamespace\x18\x01 \x01(\t\";\n\x0fTriplesResponse\x12(\n\x07triples\x18\x01 \x03(\x0b\x32\x17.semantic_engine.Triple\"p\n\x10ReasoningRequest\x12\x11\n\tnamespace\x18\x01 \x01(\t\x12\x34\n\x08strategy\x18\x02 \x01(\x0e\x32\".semantic_engine.ReasoningStrategy\x12\x13\n\x0bmaterialize\x18\x03 \x01(\x08\"O\n\x11ReasoningResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08\x12\x18\n\x10triples_inferred\x18\x02 \x01(\r\x12\x0f\n\x07message\x18\x03 \x01(\t*9\n\nSearchMode\x12\x0f\n\x0bVECTOR_ONLY\x10\x00\x12\x0e\n\nGRAPH_ONLY\x10\x01\x12\n\n\x06HYBRID\x10\x02*2\n\x11ReasoningStrategy\x12\x08\n\x04NONE\x10\x00\x12\x08\n\x04RDFS\x10\x01\x12\t\n\x05OWLRL\x10\x02\x32\xca\x06\n\x0eSemanticEngine\x12P\n\rIngestTriples\x12\x1e.semantic_engine.IngestRequest\x1a\x1f.semantic_engine.IngestResponse\x12Q\n\nIngestFile\x12\".semantic_engine.IngestFileRequest\x1a\x1f.semantic_engine.IngestResponse\x12O\n\x0cGetNeighbors\x12\x1c.semantic_engine.NodeRequest\x1a!.semantic_engine.NeighborResponse\x12I\n\x06Search\x12\x1e.semantic_engine.SearchRequest\x1a\x1f.semantic_engine.SearchResponse\x12N\n\tResolveId\x12\x1f.semantic_engine.ResolveRequest\x1a .semantic_engine.ResolveResponse\x12P\n\rGetAllTriples\x12\x1d.semantic_engine.EmptyRequest\x1a .semantic_engine.TriplesResponse\x12N\n\x0bQuerySparql\x12\x1e.semantic_engine.SparqlRequest\x1a\x1f.semantic_engine.SparqlResponse\x12U\n\x13\x44\x65leteNamespaceData\x12\x1d.semantic_engine.EmptyRequest\x1a\x1f.semantic_engine.DeleteResponse\x12U\n\x0cHybridSearch\x12$.semantic_engine.HybridSearchRequest\x1a\x1f.semantic_engine.SearchResponse\x12W\n\x0e\x41pplyReasoning\x12!.semantic_engine.ReasoningRequest\x1a\".semantic_engine.ReasoningResponseb\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
 _builder.BuildTopDescriptorsAndMessages(DESCRIPTOR, 'semantic_engine_pb2', _globals)
 if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
-  _globals['_SEARCHMODE']._serialized_start=1504
-  _globals['_SEARCHMODE']._serialized_end=1561
-  _globals['_REASONINGSTRATEGY']._serialized_start=1563
-  _globals['_REASONINGSTRATEGY']._serialized_end=1613
+  _globals['_SEARCHMODE']._serialized_start=1699
+  _globals['_SEARCHMODE']._serialized_end=1756
+  _globals['_REASONINGSTRATEGY']._serialized_start=1758
+  _globals['_REASONINGSTRATEGY']._serialized_end=1808
   _globals['_SPARQLREQUEST']._serialized_start=42
   _globals['_SPARQLREQUEST']._serialized_end=91
   _globals['_SPARQLRESPONSE']._serialized_start=93
@@ -51,32 +51,32 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_INGESTFILEREQUEST']._serialized_end=516
   _globals['_INGESTRESPONSE']._serialized_start=518
   _globals['_INGESTRESPONSE']._serialized_end=576
-  _globals['_NODEREQUEST']._serialized_start=578
-  _globals['_NODEREQUEST']._serialized_end=627
-  _globals['_NEIGHBORRESPONSE']._serialized_start=629
-  _globals['_NEIGHBORRESPONSE']._serialized_end=693
-  _globals['_NEIGHBOR']._serialized_start=695
-  _globals['_NEIGHBOR']._serialized_end=741
-  _globals['_SEARCHREQUEST']._serialized_start=743
-  _globals['_SEARCHREQUEST']._serialized_end=807
-  _globals['_SEARCHRESPONSE']._serialized_start=809
-  _globals['_SEARCHRESPONSE']._serialized_end=873
-  _globals['_SEARCHRESULT']._serialized_start=875
-  _globals['_SEARCHRESULT']._serialized_end=951
-  _globals['_HYBRIDSEARCHREQUEST']._serialized_start=954
-  _globals['_HYBRIDSEARCHREQUEST']._serialized_end=1106
-  _globals['_RESOLVEREQUEST']._serialized_start=1108
-  _globals['_RESOLVEREQUEST']._serialized_end=1160
-  _globals['_RESOLVERESPONSE']._serialized_start=1162
-  _globals['_RESOLVERESPONSE']._serialized_end=1211
-  _globals['_EMPTYREQUEST']._serialized_start=1213
-  _globals['_EMPTYREQUEST']._serialized_end=1246
-  _globals['_TRIPLESRESPONSE']._serialized_start=1248
-  _globals['_TRIPLESRESPONSE']._serialized_end=1307
-  _globals['_REASONINGREQUEST']._serialized_start=1309
-  _globals['_REASONINGREQUEST']._serialized_end=1421
-  _globals['_REASONINGRESPONSE']._serialized_start=1423
-  _globals['_REASONINGRESPONSE']._serialized_end=1502
-  _globals['_SEMANTICENGINE']._serialized_start=1616
-  _globals['_SEMANTICENGINE']._serialized_end=2458
+  _globals['_NODEREQUEST']._serialized_start=579
+  _globals['_NODEREQUEST']._serialized_end=760
+  _globals['_NEIGHBORRESPONSE']._serialized_start=762
+  _globals['_NEIGHBORRESPONSE']._serialized_end=826
+  _globals['_NEIGHBOR']._serialized_start=828
+  _globals['_NEIGHBOR']._serialized_end=936
+  _globals['_SEARCHREQUEST']._serialized_start=938
+  _globals['_SEARCHREQUEST']._serialized_end=1002
+  _globals['_SEARCHRESPONSE']._serialized_start=1004
+  _globals['_SEARCHRESPONSE']._serialized_end=1068
+  _globals['_SEARCHRESULT']._serialized_start=1070
+  _globals['_SEARCHRESULT']._serialized_end=1146
+  _globals['_HYBRIDSEARCHREQUEST']._serialized_start=1149
+  _globals['_HYBRIDSEARCHREQUEST']._serialized_end=1301
+  _globals['_RESOLVEREQUEST']._serialized_start=1303
+  _globals['_RESOLVEREQUEST']._serialized_end=1355
+  _globals['_RESOLVERESPONSE']._serialized_start=1357
+  _globals['_RESOLVERESPONSE']._serialized_end=1406
+  _globals['_EMPTYREQUEST']._serialized_start=1408
+  _globals['_EMPTYREQUEST']._serialized_end=1441
+  _globals['_TRIPLESRESPONSE']._serialized_start=1443
+  _globals['_TRIPLESRESPONSE']._serialized_end=1502
+  _globals['_REASONINGREQUEST']._serialized_start=1504
+  _globals['_REASONINGREQUEST']._serialized_end=1616
+  _globals['_REASONINGRESPONSE']._serialized_start=1618
+  _globals['_REASONINGRESPONSE']._serialized_end=1697
+  _globals['_SEMANTICENGINE']._serialized_start=1811
+  _globals['_SEMANTICENGINE']._serialized_end=2653
 # @@protoc_insertion_point(module_scope)
