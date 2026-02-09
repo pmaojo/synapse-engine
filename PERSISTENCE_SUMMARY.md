@@ -29,27 +29,35 @@ Created `scripts/batch_ingest.py` - automatically processes ALL files in `docume
                │ Periodic Save
                ▼
 ┌─────────────────────────────────────┐
-│  graph.bin (Disk)                   │
+│  uri_mappings.bin, vectors.bin      │
 │  - Binary serialization (bincode)   │
+│  - Atomic writes (rename)           │
 │  - Loads on startup                 │
 │  - Survives crashes (last save)     │
 └─────────────────────────────────────┘
 ```
 
 **Features:**
-- ✅ **Auto-save every 100 triples** (configurable)
-- ✅ **Graceful shutdown** (Ctrl+C saves before exit)
-- ✅ **Fast load** on startup (<1s for 10K triples)
-- ⚠️ **Crash recovery**: Loses only data since last auto-save
+- ✅ **Auto-save every 100 vector items** (configurable via `VectorStore::auto_save_threshold`)
+- ✅ **Graceful shutdown** (Ctrl+C triggers full flush before exit)
+- ✅ **Binary Persistence** (Fast loading/saving using `bincode`)
+- ✅ **Atomic Writes** (Prevents file corruption by writing to `.tmp` then renaming)
+- ⚠️ **Crash recovery**: Loses only data since last auto-save (max 100 items)
 
-**Files Created:**
-- `crates/semantic-engine/src/persistence.rs` - Serialization logic
-- Dependencies added: `serde`, `bincode`
+**Files Created/Modified:**
+- `crates/semantic-engine/src/persistence.rs` - Generic binary serialization logic
+- `crates/semantic-engine/src/vector_store.rs` - Added persistence and auto-save logic
+- `crates/semantic-engine/src/store.rs` - Added persistence for ID mappings
+- `crates/semantic-engine/src/main.rs` - Added graceful shutdown handler
+
+**Usage:**
+The server now automatically persists data to `data/graphs/<namespace>/`.
+- `uri_mappings.bin`: Maps string URIs to integer IDs.
+- `vectors.bin`: Stores vector embeddings and metadata.
+- Graph data is stored by Oxigraph in the same directory.
 
 **Next Step:** Rebuild Rust server to enable persistence:
 ```bash
 cd crates/semantic-engine
 cargo build --release
 ```
-
-Would you like me to complete the auto-save implementation in the server?

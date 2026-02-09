@@ -1,7 +1,10 @@
-use synapse_core::server::{MySemanticEngine, proto::{NodeRequest, IngestRequest, Triple}};
-use synapse_core::server::proto::semantic_engine_server::SemanticEngine;
-use tonic::Request;
 use std::env;
+use synapse_core::server::proto::semantic_engine_server::SemanticEngine;
+use synapse_core::server::{
+    proto::{IngestRequest, NodeRequest, Triple},
+    MySemanticEngine,
+};
+use tonic::Request;
 
 #[tokio::test]
 async fn test_node_type_filter() {
@@ -16,13 +19,36 @@ async fn test_node_type_filter() {
     // A -> B (Type: Person)
     // A -> C (Type: Bot)
     let triples = vec![
-        Triple { subject: "A".into(), predicate: "knows".into(), object: "B".into(), ..Default::default() },
-        Triple { subject: "A".into(), predicate: "knows".into(), object: "C".into(), ..Default::default() },
-        Triple { subject: "B".into(), predicate: "http://www.w3.org/1999/02/22-rdf-syntax-ns#type".into(), object: "Person".into(), ..Default::default() },
-        Triple { subject: "C".into(), predicate: "http://www.w3.org/1999/02/22-rdf-syntax-ns#type".into(), object: "Bot".into(), ..Default::default() },
+        Triple {
+            subject: "A".into(),
+            predicate: "knows".into(),
+            object: "B".into(),
+            ..Default::default()
+        },
+        Triple {
+            subject: "A".into(),
+            predicate: "knows".into(),
+            object: "C".into(),
+            ..Default::default()
+        },
+        Triple {
+            subject: "B".into(),
+            predicate: "http://www.w3.org/1999/02/22-rdf-syntax-ns#type".into(),
+            object: "Person".into(),
+            ..Default::default()
+        },
+        Triple {
+            subject: "C".into(),
+            predicate: "http://www.w3.org/1999/02/22-rdf-syntax-ns#type".into(),
+            object: "Bot".into(),
+            ..Default::default()
+        },
     ];
 
-    let req = Request::new(IngestRequest { triples, namespace: namespace.into() });
+    let req = Request::new(IngestRequest {
+        triples,
+        namespace: namespace.into(),
+    });
     engine.ingest_triples(req).await.unwrap();
 
     let store = engine.get_store(namespace).unwrap();
@@ -54,7 +80,9 @@ async fn test_auth_read_fail() {
     let _ = std::fs::remove_dir_all(storage_path);
 
     // Set auth tokens
-    env::set_var("SYNAPSE_AUTH_TOKENS", r#"
+    env::set_var(
+        "SYNAPSE_AUTH_TOKENS",
+        r#"
     {
         "user_read": {
             "namespaces": ["default"],
@@ -65,22 +93,31 @@ async fn test_auth_read_fail() {
              "permissions": {"read": false, "write": false, "delete": false, "reason": false}
         }
     }
-    "#);
+    "#,
+    );
 
     // Force reload of auth by creating new engine (auth loads from env in constructor)
     let engine = MySemanticEngine::new(storage_path);
     let namespace = "default";
 
     // Request with valid read token
-    let mut req_good = Request::new(synapse_core::server::proto::EmptyRequest { namespace: namespace.into() });
-    req_good.metadata_mut().insert("authorization", "Bearer user_read".parse().unwrap());
+    let mut req_good = Request::new(synapse_core::server::proto::EmptyRequest {
+        namespace: namespace.into(),
+    });
+    req_good
+        .metadata_mut()
+        .insert("authorization", "Bearer user_read".parse().unwrap());
 
     let res = engine.get_all_triples(req_good).await;
     assert!(res.is_ok(), "Read should succeed with read permission");
 
     // Request with no permission
-    let mut req_bad = Request::new(synapse_core::server::proto::EmptyRequest { namespace: namespace.into() });
-    req_bad.metadata_mut().insert("authorization", "Bearer user_none".parse().unwrap());
+    let mut req_bad = Request::new(synapse_core::server::proto::EmptyRequest {
+        namespace: namespace.into(),
+    });
+    req_bad
+        .metadata_mut()
+        .insert("authorization", "Bearer user_none".parse().unwrap());
 
     let res = engine.get_all_triples(req_bad).await;
     assert!(res.is_err(), "Read should fail with no permission");

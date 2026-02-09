@@ -1,5 +1,5 @@
-use synapse_core::store::{SynapseStore, IngestTriple, Provenance};
 use std::env;
+use synapse_core::store::{IngestTriple, Provenance, SynapseStore};
 
 #[tokio::test]
 async fn test_provenance_persistence() {
@@ -39,7 +39,8 @@ async fn test_provenance_persistence() {
     // Verify provenance metadata in default graph
     // SPARQL: SELECT ?s WHERE { ?s <http://www.w3.org/ns/prov#wasDerivedFrom> "test_source" }
     // Note: Literal matching in SPARQL might need type or exact string.
-    let query_meta = "SELECT ?s WHERE { ?s <http://www.w3.org/ns/prov#wasDerivedFrom> \"test_source\" }";
+    let query_meta =
+        "SELECT ?s WHERE { ?s <http://www.w3.org/ns/prov#wasDerivedFrom> \"test_source\" }";
     let result_meta = store.query_sparql(query_meta).unwrap();
     assert_ne!(result_meta, "[]");
 }

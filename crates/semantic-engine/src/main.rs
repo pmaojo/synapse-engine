@@ -34,9 +34,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("🚀 Synapse (ex-Grafoso) listening on {}", addr);
         println!("Storage Path: {}", storage_path);
 
+        let engine_clone = engine.clone();
+
         Server::builder()
-            .add_service(SemanticEngineServer::with_interceptor(engine, synapse_core::server::auth_interceptor))
-            .serve(addr)
+            .add_service(SemanticEngineServer::with_interceptor(
+                engine,
+                synapse_core::server::auth_interceptor,
+            ))
+            .serve_with_shutdown(addr, async move {
+                if tokio::signal::ctrl_c().await.is_ok() {
+                    println!("\nShutting down Synapse...");
+                }
+                engine_clone.shutdown().await;
+            })
             .await?;
     }
 
