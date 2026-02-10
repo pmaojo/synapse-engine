@@ -50,6 +50,22 @@ impl McpStdioServer {
         Ok(())
     }
 
+    fn create_request<T>(msg: T) -> Request<T> {
+        let mut req = Request::new(msg);
+
+        // Try to get token from env
+        let token_opt = std::env::var("SYNAPSE_ADMIN_TOKEN")
+            .or_else(|_| std::env::var("SYNAPSE_MCP_TOKEN"))
+            .ok();
+
+        if let Some(token) = token_opt {
+             if let Ok(val) = format!("Bearer {}", token).parse() {
+                 req.metadata_mut().insert("authorization", val);
+             }
+        }
+        req
+    }
+
     fn get_tools() -> Vec<Tool> {
         vec![
             Tool {
@@ -396,7 +412,7 @@ impl McpStdioServer {
             }
         }
 
-        let req = Request::new(IngestRequest {
+        let req = Self::create_request(IngestRequest {
             triples,
             namespace: namespace.to_string(),
         });
@@ -429,7 +445,7 @@ impl McpStdioServer {
             .and_then(|v| v.as_str())
             .unwrap_or("default");
 
-        let req = Request::new(IngestFileRequest {
+        let req = Self::create_request(IngestFileRequest {
             file_path: path.to_string(),
             namespace: namespace.to_string(),
         });
@@ -462,7 +478,7 @@ impl McpStdioServer {
             .and_then(|v| v.as_str())
             .unwrap_or("default");
 
-        let req = Request::new(SparqlRequest {
+        let req = Self::create_request(SparqlRequest {
             query: query.to_string(),
             namespace: namespace.to_string(),
         });
@@ -493,7 +509,7 @@ impl McpStdioServer {
             .unwrap_or(1) as u32;
         let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(20) as u32;
 
-        let req = Request::new(HybridSearchRequest {
+        let req = Self::create_request(HybridSearchRequest {
             query: query.to_string(),
             namespace: namespace.to_string(),
             vector_k,
@@ -545,7 +561,7 @@ impl McpStdioServer {
             _ => ReasoningStrategy::Rdfs as i32,
         };
 
-        let req = Request::new(ReasoningRequest {
+        let req = Self::create_request(ReasoningRequest {
             namespace: namespace.to_string(),
             strategy,
             materialize,
@@ -669,7 +685,7 @@ impl McpStdioServer {
             None => return self.error_response(id, -32602, "Missing 'namespace'"),
         };
 
-        let req = Request::new(crate::server::proto::EmptyRequest {
+        let req = Self::create_request(crate::server::proto::EmptyRequest {
             namespace: namespace.to_string(),
         });
 
@@ -975,7 +991,7 @@ impl McpStdioServer {
                 embedding: vec![],
             };
 
-            let req = Request::new(IngestRequest {
+            let req = Self::create_request(IngestRequest {
                 triples: vec![triple],
                 namespace: namespace.to_string(),
             });
@@ -1008,7 +1024,7 @@ impl McpStdioServer {
                 .and_then(|v| v.as_str())
                 .unwrap_or("default");
 
-            let req = Request::new(IngestFileRequest {
+            let req = Self::create_request(IngestFileRequest {
                 file_path: path.to_string(),
                 namespace: namespace.to_string(),
             });
