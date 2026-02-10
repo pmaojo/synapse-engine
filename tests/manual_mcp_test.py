@@ -6,7 +6,7 @@ import time
 
 # Path to the binary
 BINARY_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "../target/release/synapse"))
-NAMESPACE = "manual_mcp_test"
+NAMESPACE = "default"  # Anonymous access requires "default" namespace
 
 def run_mcp_test():
     print(f"🚀 Starting Manual MCP Test using {BINARY_PATH}...")
@@ -108,7 +108,7 @@ def run_mcp_test():
             sys.exit(1)
 
         content_text = result_data["content"][0]["text"]
-        print(f"DEBUG: content_text repr: {repr(content_text)}")
+        # print(f"DEBUG: content_text repr: {repr(content_text)}")
 
         content = json.loads(content_text)
         print(f"   Result: {content['message']}")
@@ -120,7 +120,7 @@ def run_mcp_test():
             "name": "list_triples",
             "arguments": {"namespace": NAMESPACE}
         })
-        print(f"   Triples: {resp['result']['content'][0]['text']}")
+        # print(f"   Triples: {resp['result']['content'][0]['text']}")
 
         # 5. SPARQL Query
         print("\n❓ SPARQL Query...")

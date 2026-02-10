@@ -56,11 +56,7 @@ impl McpStdioServer {
         // Try to get token from env
         let token_opt = std::env::var("SYNAPSE_ADMIN_TOKEN")
             .or_else(|_| std::env::var("SYNAPSE_MCP_TOKEN"))
-            .ok()
-            .or_else(|| {
-                // If using default config, fallback to admin_token
-                Some("admin_token".to_string())
-            });
+            .ok();
 
         if let Some(token) = token_opt {
              if let Ok(val) = format!("Bearer {}", token).parse() {
