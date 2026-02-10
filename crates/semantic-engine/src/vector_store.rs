@@ -429,6 +429,16 @@ impl VectorStore {
 
         // Search HNSW index
         let mut searcher = hnsw::Searcher::default();
+
+        let index = self.index.read().unwrap();
+        let len = index.len();
+        if len == 0 {
+            return Ok(Vec::new());
+        }
+
+        let k = k.min(len);
+        let ef = k.max(50); // Ensure ef is at least k, but usually 50+
+
         let mut neighbors = vec![
             space::Neighbor {
                 index: 0,
@@ -437,10 +447,7 @@ impl VectorStore {
             k
         ];
 
-        let found_neighbors = {
-            let index = self.index.read().unwrap();
-            index.nearest(&query_embedding, 50, &mut searcher, &mut neighbors)
-        };
+        let found_neighbors = index.nearest(&query_embedding, ef, &mut searcher, &mut neighbors);
 
         // Convert to results
         let id_map = self.id_to_key.read().unwrap();

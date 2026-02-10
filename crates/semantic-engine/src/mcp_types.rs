@@ -43,6 +43,7 @@ pub struct ListToolsResult {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CallToolResult {
     pub content: Vec<Content>,
+    #[serde(rename = "isError")]
     pub is_error: Option<bool>,
 }
 
