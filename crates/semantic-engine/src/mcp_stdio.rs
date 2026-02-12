@@ -59,9 +59,9 @@ impl McpStdioServer {
             .ok();
 
         if let Some(token) = token_opt {
-             if let Ok(val) = format!("Bearer {}", token).parse() {
-                 req.metadata_mut().insert("authorization", val);
-             }
+            if let Ok(val) = format!("Bearer {}", token).parse() {
+                req.metadata_mut().insert("authorization", val);
+            }
         }
         req
     }
@@ -261,6 +261,19 @@ impl McpStdioServer {
                     "required": ["uri"]
                 }),
             },
+            Tool {
+                name: "install_ontology".to_string(),
+                description: Some("Download and install an ontology from a URL".to_string()),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "url": { "type": "string", "description": "URL of the ontology file (.owl, .ttl)" },
+                        "name": { "type": "string", "description": "Name for the local file (e.g. 'legal.owl')" },
+                        "namespace": { "type": "string", "default": "default" }
+                    },
+                    "required": ["url", "name"]
+                }),
+            },
         ]
     }
 
@@ -373,7 +386,95 @@ impl McpStdioServer {
             "vector_stats" => self.call_vector_stats(request.id, &arguments).await,
             "disambiguate" => self.call_disambiguate(request.id, &arguments).await,
             "get_node_degree" => self.call_get_node_degree(request.id, &arguments).await,
+            "install_ontology" => self.call_install_ontology(request.id, &arguments).await,
             _ => self.error_response(request.id, -32602, &format!("Unknown tool: {}", tool_name)),
+        }
+    }
+
+    async fn call_install_ontology(
+        &self,
+        id: Option<serde_json::Value>,
+        args: &serde_json::Map<String, serde_json::Value>,
+    ) -> McpResponse {
+        let url = match args.get("url").and_then(|v| v.as_str()) {
+            Some(u) => u,
+            None => return self.error_response(id, -32602, "Missing 'url'"),
+        };
+        let name = match args.get("name").and_then(|v| v.as_str()) {
+            Some(n) => n,
+            None => return self.error_response(id, -32602, "Missing 'name'"),
+        };
+        let namespace = args
+            .get("namespace")
+            .and_then(|v| v.as_str())
+            .unwrap_or("default");
+
+        // Download
+        let response = match reqwest::get(url).await {
+            Ok(r) => r,
+            Err(e) => {
+                return self.tool_result(id, &format!("Failed to download ontology: {}", e), true)
+            }
+        };
+
+        if !response.status().is_success() {
+            return self.tool_result(id, &format!("HTTP error: {}", response.status()), true);
+        }
+
+        let content = match response.text().await {
+            Ok(t) => t,
+            Err(e) => {
+                return self.tool_result(id, &format!("Failed to read response: {}", e), true)
+            }
+        };
+
+        // Ensure ontology directory exists
+        let ontology_dir = std::path::Path::new("ontology");
+        if !ontology_dir.exists() {
+            if let Err(e) = std::fs::create_dir(ontology_dir) {
+                return self.tool_result(
+                    id,
+                    &format!("Failed to create ontology dir: {}", e),
+                    true,
+                );
+            }
+        }
+
+        // Security check: Sanitize filename to prevent directory traversal
+        let file_name = std::path::Path::new(name)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .ok_or_else(|| "Invalid filename".to_string());
+
+        let clean_name = match file_name {
+            Ok(n) => n,
+            Err(e) => return self.tool_result(id, &format!("Security error: {}", e), true),
+        };
+
+        if clean_name != name {
+             return self.tool_result(id, "Security error: Filename contains path components", true);
+        }
+
+        let path = ontology_dir.join(clean_name);
+        if let Err(e) = std::fs::write(&path, content) {
+            return self.tool_result(id, &format!("Failed to save ontology file: {}", e), true);
+        }
+
+        // Load into store
+        let store = match self.engine.get_store(namespace) {
+            Ok(s) => s,
+            Err(e) => return self.tool_result(id, &e.to_string(), true),
+        };
+
+        match crate::ingest::ontology::OntologyLoader::load_file(&store, &path).await {
+            Ok(count) => {
+                let result = SimpleSuccessResult {
+                    success: true,
+                    message: format!("Installed ontology '{}' and loaded {} triples", name, count),
+                };
+                self.serialize_result(id, result)
+            }
+            Err(e) => self.tool_result(id, &format!("Failed to load ontology: {}", e), true),
         }
     }
 

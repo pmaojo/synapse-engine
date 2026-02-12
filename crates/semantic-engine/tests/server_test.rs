@@ -126,6 +126,14 @@ async fn test_get_neighbors_deterministic_scoring() {
     // A -> B (depth 1)
     // A -> C (depth 1)
     // A -> C -> D (depth 2)
+    // Note: The neighbor finding logic in BFS might visit nodes but filter duplicates.
+    // If D is reached via C, it should be included.
+
+    // Debug output
+    for n in &resp_depth.neighbors {
+        println!("Depth 2 neighbor: {} (depth {})", n.uri, n.depth);
+    }
+
     assert_eq!(resp_depth.neighbors.len(), 3);
     let n_d = resp_depth
         .neighbors

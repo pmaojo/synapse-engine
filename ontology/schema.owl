@@ -1,0 +1,95 @@
+<?xml version="1.0"?>
+<rdf:RDF xmlns="http://schema.org/"
+     xml:base="http://schema.org/"
+     xmlns:owl="http://www.w3.org/2002/07/owl#"
+     xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+     xmlns:xml="http://www.w3.org/XML/1998/namespace"
+     xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
+     xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#">
+    <owl:Ontology rdf:about="http://schema.org/"/>
+
+    <!-- Core Classes -->
+    <owl:Class rdf:about="http://schema.org/Thing">
+        <rdfs:comment>The most generic type of item.</rdfs:comment>
+    </owl:Class>
+
+    <owl:Class rdf:about="http://schema.org/Action">
+        <rdfs:subClassOf rdf:resource="http://schema.org/Thing"/>
+        <rdfs:comment>An action performed by a direct agent and indirect participants upon a direct object.</rdfs:comment>
+    </owl:Class>
+
+    <owl:Class rdf:about="http://schema.org/Event">
+        <rdfs:subClassOf rdf:resource="http://schema.org/Thing"/>
+        <rdfs:comment>An event happening at a certain time and location.</rdfs:comment>
+    </owl:Class>
+
+    <owl:Class rdf:about="http://schema.org/CreativeWork">
+        <rdfs:subClassOf rdf:resource="http://schema.org/Thing"/>
+        <rdfs:comment>The most generic kind of creative work, including books, movies, photographs, software programs, etc.</rdfs:comment>
+    </owl:Class>
+
+    <owl:Class rdf:about="http://schema.org/MediaObject">
+        <rdfs:subClassOf rdf:resource="http://schema.org/CreativeWork"/>
+        <rdfs:comment>A media object, such as an image, video, or audio object embedded in a web page or a downloadable dataset.</rdfs:comment>
+    </owl:Class>
+
+    <owl:Class rdf:about="http://schema.org/Organization">
+        <rdfs:subClassOf rdf:resource="http://schema.org/Thing"/>
+        <rdfs:comment>An organization such as a school, NGO, corporation, club, etc.</rdfs:comment>
+    </owl:Class>
+
+    <owl:Class rdf:about="http://schema.org/Person">
+        <rdfs:subClassOf rdf:resource="http://schema.org/Thing"/>
+        <rdfs:comment>A person (alive, dead, undead, or fictional).</rdfs:comment>
+    </owl:Class>
+
+    <owl:Class rdf:about="http://schema.org/Place">
+        <rdfs:subClassOf rdf:resource="http://schema.org/Thing"/>
+        <rdfs:comment>Entities that have a somewhat fixed, physical extension.</rdfs:comment>
+    </owl:Class>
+
+    <owl:Class rdf:about="http://schema.org/SoftwareApplication">
+        <rdfs:subClassOf rdf:resource="http://schema.org/CreativeWork"/>
+        <rdfs:comment>A software application.</rdfs:comment>
+    </owl:Class>
+
+    <!-- Core Properties -->
+    <owl:ObjectProperty rdf:about="http://schema.org/agent">
+        <rdfs:domain rdf:resource="http://schema.org/Action"/>
+        <rdfs:range rdf:resource="http://schema.org/Organization"/>
+        <rdfs:range rdf:resource="http://schema.org/Person"/>
+        <rdfs:comment>The direct performer or driver of the action (animate or inanimate).</rdfs:comment>
+    </owl:ObjectProperty>
+
+    <owl:ObjectProperty rdf:about="http://schema.org/participant">
+        <rdfs:domain rdf:resource="http://schema.org/Action"/>
+        <rdfs:range rdf:resource="http://schema.org/Organization"/>
+        <rdfs:range rdf:resource="http://schema.org/Person"/>
+        <rdfs:comment>Other co-agents that participated in the action performing.</rdfs:comment>
+    </owl:ObjectProperty>
+
+    <owl:ObjectProperty rdf:about="http://schema.org/object">
+        <rdfs:domain rdf:resource="http://schema.org/Action"/>
+        <rdfs:range rdf:resource="http://schema.org/Thing"/>
+        <rdfs:comment>The object upon which the action is carried out, whose state is kept intact or changed.</rdfs:comment>
+    </owl:ObjectProperty>
+
+    <owl:DatatypeProperty rdf:about="http://schema.org/name">
+        <rdfs:domain rdf:resource="http://schema.org/Thing"/>
+        <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#string"/>
+        <rdfs:comment>The name of the item.</rdfs:comment>
+    </owl:DatatypeProperty>
+
+    <owl:DatatypeProperty rdf:about="http://schema.org/description">
+        <rdfs:domain rdf:resource="http://schema.org/Thing"/>
+        <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#string"/>
+        <rdfs:comment>A description of the item.</rdfs:comment>
+    </owl:DatatypeProperty>
+
+    <owl:DatatypeProperty rdf:about="http://schema.org/url">
+        <rdfs:domain rdf:resource="http://schema.org/Thing"/>
+        <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#anyURI"/>
+        <rdfs:comment>URL of the item.</rdfs:comment>
+    </owl:DatatypeProperty>
+
+</rdf:RDF>

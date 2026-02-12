@@ -15,6 +15,42 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let engine = MySemanticEngine::new(&storage_path);
 
+    // Load default ontologies on startup
+    let ontology_path = std::path::Path::new("ontology");
+    if ontology_path.exists() {
+        let msg = format!("Loading ontologies from {:?}", ontology_path);
+        if is_mcp {
+            eprintln!("{}", msg);
+        } else {
+            println!("{}", msg);
+        }
+
+        match engine.get_store("default") {
+            Ok(store) => {
+                match synapse_core::ingest::ontology::OntologyLoader::load_directory(
+                    &store,
+                    ontology_path,
+                )
+                .await
+                {
+                    Ok(count) => {
+                        let msg =
+                            format!("Loaded {} ontology triples into 'default' namespace", count);
+                        if is_mcp {
+                            eprintln!("{}", msg);
+                        } else {
+                            println!("{}", msg);
+                        }
+                    }
+                    Err(e) => eprintln!("Failed to load ontologies: {}", e),
+                }
+            }
+            Err(e) => eprintln!("Failed to open default store for ontologies: {}", e),
+        }
+    } else if !is_mcp {
+        println!("No 'ontology' directory found, skipping ontology loading.");
+    }
+
     if is_mcp {
         // MCP mode: no stdout messages, only JSON-RPC
         eprintln!("Synapse-MCP starting (stdio mode)...");
