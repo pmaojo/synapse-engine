@@ -9,6 +9,7 @@
 -   **Reasoning Engine**: Built-in OWL-RL and RDFS reasoning strategies to derive implicit knowledge.
 -   **Multi-Tenancy**: Native support for isolated namespaces (e.g., `work`, `personal`, `os`).
 -   **Native MCP**: Seamlessly integrates as a [Model Context Protocol](https://modelcontextprotocol.io) server.
+-   **Ontology-Driven**: Automatically loads standard ontologies (Schema.org, PROV-O, etc.) to structure knowledge.
 
 ## 📦 Installation & Setup
 
@@ -19,7 +20,7 @@ npx skills install pmaojo/synapse-engine
 *Note: During installation, you will be prompted to set Synapse as your default memory provider.*
 
 ### Python SDK
-v0.4.0 introduces the official high-level SDK:
+v0.5.2 introduces the official high-level SDK:
 ```bash
 pip install ./python-sdk
 ```
@@ -44,7 +45,7 @@ client.ingest_triples([
 results = client.hybrid_search("What is Pelayo's expertise?", namespace="work")
 ```
 
-### MCP Integration (v0.4.0)
+### MCP Integration (v0.5.2)
 Add Synapse to your `openclaw.json` (or Cursor/Claude Desktop) to enable direct LLM access to your knowledge graph:
 
 ```json
@@ -65,6 +66,30 @@ Add Synapse to your `openclaw.json` (or Cursor/Claude Desktop) to enable direct 
 - `hybrid_search`: Semantic + structural retrieval.
 - `apply_reasoning`: Trigger OWL-RL/RDFS inference.
 - `ingest_url`: Automated scraping and embedding.
+- `install_ontology`: Download and install new ontologies from the web.
+
+## 📚 Ontologies & Semantic Memory
+
+Synapse comes pre-loaded with essential ontologies to help Agents understand the world "out-of-the-box":
+
+*   **Schema.org** (`schema.owl`): Core definitions for Person, Action, Event, Organization.
+*   **PROV-O** (`prov.owl`): Provenance ontology to track where knowledge comes from (e.g., `wasDerivedFrom`, `generatedAtTime`).
+*   **Memory Ontology** (`memory.owl`): Specialized for Episodic Memory (`Conversation`, `UserInstruction`, `AgentAction`).
+*   **SKOS** (`skos.owl`): Simple Knowledge Organization System for concepts and tesaurus.
+*   **FOAF** (`foaf.owl`): Friend of a Friend for social connections.
+
+These files are located in `ontology/` and are automatically loaded into the `default` namespace on startup.
+
+To add a new ontology dynamically via MCP:
+```json
+{
+  "name": "install_ontology",
+  "arguments": {
+    "url": "https://raw.githubusercontent.com/ad-hoc-network/legal-ontology/main/legal.owl",
+    "name": "legal.owl"
+  }
+}
+```
 
 ## 🌐 Notion Sync: Automated Memory
 
