@@ -452,7 +452,11 @@ impl McpStdioServer {
         };
 
         if clean_name != name {
-             return self.tool_result(id, "Security error: Filename contains path components", true);
+            return self.tool_result(
+                id,
+                "Security error: Filename contains path components",
+                true,
+            );
         }
 
         let path = ontology_dir.join(clean_name);

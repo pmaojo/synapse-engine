@@ -316,12 +316,12 @@ impl SemanticEngine for MySemanticEngine {
                                     _ => &obj_uri,
                                 };
 
-                                    // Always add to neighbors if not already in neighbors list to avoid duplicates there
-                                    // But we must allow revisiting nodes for graph expansion if we want to find paths?
-                                    // BFS typically avoids cycles by checking visited.
+                                // Always add to neighbors if not already in neighbors list to avoid duplicates there
+                                // But we must allow revisiting nodes for graph expansion if we want to find paths?
+                                // BFS typically avoids cycles by checking visited.
 
-                                    // NOTE: visited set prevents processing same node twice in BFS.
-                                    // If we reach a node that was already visited in a previous layer (or this layer), skip it.
+                                // NOTE: visited set prevents processing same node twice in BFS.
+                                // If we reach a node that was already visited in a previous layer (or this layer), skip it.
                                 if !visited.contains(&obj_uri) {
                                     visited.insert(obj_uri.clone());
                                     let obj_id = store.get_or_create_id(&obj_uri);
@@ -329,7 +329,7 @@ impl SemanticEngine for MySemanticEngine {
                                     let mut neighbor_score = base_score;
                                     if req.scoring_strategy == "degree" {
                                         let degree = store.get_degree(clean_uri);
-                                            neighbor_score /= (degree as f32 + 1.0).ln().max(0.1);
+                                        neighbor_score /= (degree as f32 + 1.0).ln().max(0.1);
                                     }
 
                                     neighbors.push(Neighbor {

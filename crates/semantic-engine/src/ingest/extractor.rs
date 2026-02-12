@@ -26,7 +26,10 @@ pub fn extract_metadata(content: &str, source_path: &str) -> Vec<ExtractedTriple
                 predicate: "http://synapse.os/contains_section".to_string(),
                 object: current_header.clone(),
             });
-        } else if let Some(item) = trimmed.strip_prefix("- ").or_else(|| trimmed.strip_prefix("* ")) {
+        } else if let Some(item) = trimmed
+            .strip_prefix("- ")
+            .or_else(|| trimmed.strip_prefix("* "))
+        {
             if !current_header.is_empty() {
                 triples.push(ExtractedTriple {
                     subject: current_header.clone(),
