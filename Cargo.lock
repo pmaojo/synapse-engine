@@ -2548,7 +2548,7 @@ dependencies = [
 
 [[package]]
 name = "synapse-core"
-version = "0.5.3"
+version = "0.5.4"
 dependencies = [
  "anyhow",
  "bincode",
