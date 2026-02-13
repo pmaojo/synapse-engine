@@ -1,0 +1,49 @@
+<?xml version="1.0"?>
+<rdf:RDF xmlns="http://sys.semantic/frontend#"
+     xml:base="http://sys.semantic/frontend"
+     xmlns:owl="http://www.w3.org/2002/07/owl#"
+     xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+     xmlns:xml="http://www.w3.org/XML/1998/namespace"
+     xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
+     xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+     xmlns:core="http://sys.semantic/core#">
+    <owl:Ontology rdf:about="http://sys.semantic/frontend">
+        <owl:imports rdf:resource="http://sys.semantic/core"/>
+    </owl:Ontology>
+
+    <!-- Classes -->
+
+    <owl:Class rdf:about="http://sys.semantic/frontend#FrontendLead">
+        <rdfs:subClassOf rdf:resource="http://sys.semantic/core#Role"/>
+    </owl:Class>
+
+    <owl:Class rdf:about="http://sys.semantic/frontend#Artifact">
+        <rdfs:subClassOf rdf:resource="http://sys.semantic/core#Entity"/>
+    </owl:Class>
+
+    <owl:Class rdf:about="http://sys.semantic/frontend#Page">
+        <rdfs:subClassOf rdf:resource="http://sys.semantic/frontend#Artifact"/>
+    </owl:Class>
+
+    <owl:Class rdf:about="http://sys.semantic/frontend#Component">
+        <rdfs:subClassOf rdf:resource="http://sys.semantic/frontend#Artifact"/>
+    </owl:Class>
+
+    <owl:Class rdf:about="http://sys.semantic/frontend#Codebase">
+        <rdfs:subClassOf rdf:resource="http://sys.semantic/frontend#Artifact"/>
+    </owl:Class>
+
+    <!-- Properties -->
+
+    <owl:ObjectProperty rdf:about="http://sys.semantic/frontend#manages">
+        <rdfs:domain rdf:resource="http://sys.semantic/frontend#FrontendLead"/>
+        <rdfs:range rdf:resource="http://sys.semantic/frontend#Codebase"/>
+    </owl:ObjectProperty>
+
+    <owl:ObjectProperty rdf:about="http://sys.semantic/frontend#composedOf">
+        <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#TransitiveProperty"/>
+        <rdfs:domain rdf:resource="http://sys.semantic/frontend#Artifact"/>
+        <rdfs:range rdf:resource="http://sys.semantic/frontend#Artifact"/>
+    </owl:ObjectProperty>
+
+</rdf:RDF>

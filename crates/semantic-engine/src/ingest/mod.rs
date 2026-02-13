@@ -54,7 +54,7 @@ impl IngestionEngine {
 
         // Also ingest content into vector store for RAG
         if let Some(ref vs) = self.store.vector_store {
-             let processor = super::processor::TextProcessor::new();
+            let processor = super::processor::TextProcessor::new();
             let chunks = processor.chunk_text(&content, 1000, 150);
             for (i, chunk) in chunks.iter().enumerate() {
                 let chunk_uri = format!("{}#chunk-{}", path.to_string_lossy(), i);

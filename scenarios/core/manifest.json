@@ -1,0 +1,16 @@
+{
+  "name": "core",
+  "version": "1.0.0",
+  "description": "Essential ontologies for Synapse: Schema.org, PROV-O, SKOS, FOAF, and Memory.",
+  "ontologies": [
+    "schema.owl",
+    "prov.owl",
+    "memory.owl",
+    "skos.owl",
+    "foaf.owl",
+    "core.owl",
+    "frontend.owl"
+  ],
+  "data_files": [],
+  "docs": ["readme.md"]
+}

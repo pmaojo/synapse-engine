@@ -139,3 +139,15 @@ pub struct DisambiguationResult {
     pub suggestions: Vec<DisambiguationItem>,
     pub message: String,
 }
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ScenarioItem {
+    pub name: String,
+    pub description: String,
+    pub version: String,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ScenarioListResult {
+    pub scenarios: Vec<ScenarioItem>,
+}
