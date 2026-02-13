@@ -1,0 +1,20 @@
+[Unit]
+Description=Synapse gRPC Server (Neuro-symbolic Knowledge Graph)
+After=network.target
+
+[Service]
+Type=simple
+User=robin
+Group=robin
+WorkingDirectory=/home/robin/workspace/skills/synapse
+Environment="SYNAPSE_AUTH_TOKENS={\"test\": [\"*\"]}"
+Environment="GRAPH_STORAGE_PATH=/home/robin/workspace/skills/synapse/data/graphs"
+ExecStart=/home/robin/workspace/skills/synapse/start_synapse.sh
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=synapse
+
+[Install]
+WantedBy=multi-user.target
