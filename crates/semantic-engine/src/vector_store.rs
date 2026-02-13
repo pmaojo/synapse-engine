@@ -1,16 +1,14 @@
 use crate::persistence::{load_bincode, save_bincode};
 use anyhow::Result;
+use fastembed::{InitOptions, TextEmbedding, EmbeddingModel};
 use hnsw::Hnsw;
 use rand_pcg::Pcg64;
-use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, RwLock};
 
-const HUGGINGFACE_API_URL: &str = "https://router.huggingface.co/hf-inference/models";
-const DEFAULT_MODEL: &str = "sentence-transformers/all-MiniLM-L6-v2"; // 384 dims, fast
 const DEFAULT_DIMENSIONS: usize = 384;
 const DEFAULT_AUTO_SAVE_THRESHOLD: usize = 100;
 
@@ -48,7 +46,7 @@ struct VectorEntry {
     metadata: serde_json::Value,
 }
 
-/// Vector store using HuggingFace Inference API for embeddings
+/// Vector store using Local FastEmbed for embeddings
 pub struct VectorStore {
     /// HNSW index for fast approximate nearest neighbor search
     index: Arc<RwLock<Hnsw<Euclidian, Vec<f32>, Pcg64, 16, 32>>>,
@@ -60,14 +58,8 @@ pub struct VectorStore {
     key_to_metadata: Arc<RwLock<HashMap<String, serde_json::Value>>>,
     /// Storage path for persistence
     storage_path: Option<PathBuf>,
-    /// HTTP client for HuggingFace API
-    client: Client,
-    /// HuggingFace API URL (configurable)
-    api_url: String,
-    /// HuggingFace API token (optional, for rate limits)
-    api_token: Option<String>,
-    /// Model name
-    model: String,
+    /// Local embedding model
+    model: TextEmbedding,
     /// Vector dimensions
     dimensions: usize,
     /// Stored embeddings for persistence
@@ -102,6 +94,20 @@ impl VectorStore {
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(DEFAULT_DIMENSIONS);
+
+        // Initialize FastEmbed model
+        // We use BGESmallENV15 as it is small and effective (384 dims)
+        let model_opts = InitOptions::new(EmbeddingModel::BGESmallENV15)
+            .with_show_download_progress(true);
+        
+        // Use custom cache dir if specified
+        let model_opts = if let Ok(cache_path) = std::env::var("FASTEMBED_CACHE_PATH") {
+             model_opts.with_cache_dir(PathBuf::from(cache_path))
+        } else {
+             model_opts
+        };
+
+        let model = TextEmbedding::try_new(model_opts)?;
 
         // Create HNSW index with Euclidian metric
         let mut index = Hnsw::new(Euclidian);
@@ -177,29 +183,13 @@ impl VectorStore {
             }
         }
 
-        // Get API token from environment (optional)
-        let api_token = std::env::var("HUGGINGFACE_API_TOKEN").ok();
-
-        // Get API URL from environment (or default)
-        let api_url = std::env::var("HUGGINGFACE_API_URL")
-            .unwrap_or_else(|_| HUGGINGFACE_API_URL.to_string());
-
-        // Configured client with timeout
-        let client = Client::builder()
-            .timeout(std::time::Duration::from_secs(30))
-            .build()
-            .unwrap_or_else(|_| Client::new());
-
         Ok(Self {
             index: Arc::new(RwLock::new(index)),
             id_to_key: Arc::new(RwLock::new(id_to_key)),
             key_to_id: Arc::new(RwLock::new(key_to_id)),
             key_to_metadata: Arc::new(RwLock::new(key_to_metadata)),
             storage_path,
-            client,
-            api_url,
-            api_token,
-            model: DEFAULT_MODEL.to_string(),
+            model,
             dimensions,
             embeddings: Arc::new(RwLock::new(embeddings)),
             dirty_count: Arc::new(AtomicUsize::new(0)),
@@ -211,27 +201,6 @@ impl VectorStore {
     fn save_vectors(&self) -> Result<()> {
         if let Some(ref path) = self.storage_path {
             std::fs::create_dir_all(path)?;
-
-            // Hold read lock during serialization AND dirty count reset to avoid race condition.
-            // Wait, we need to read the dirty count at the time of snapshot.
-            // But we can't atomically read-and-subtract without a loop if we don't hold a write lock on dirty_count (which is Atomic).
-            // Actually, if we just subtract the value we *saw* before starting the save, new items added during save will just remain in the counter.
-            // But we are saving the *entire* vector list, so any items added during save (if that were possible with the lock held) would be included?
-            // `embeddings` is protected by RwLock.
-            // We take a read lock on `embeddings` to clone/serialize.
-            // While we hold the read lock, NO new items can be added (add_batch needs write lock).
-            // So the snapshot is consistent.
-            // The race happens *after* we drop the read lock and *before* we reset dirty_count.
-            // During that window, a writer could add items and increment dirty_count.
-            // If we then reset to 0, we lose those counts.
-            //
-            // Fix: Read dirty_count *while holding the read lock*.
-            // Since writers are blocked, dirty_count cannot change while we hold the lock.
-            // So `current_dirty` will be exactly the number of unsaved items included in `entries`.
-            // Then we perform the save (IO).
-            // Finally we subtract `current_dirty`.
-            // If new items come in during IO (after read lock drop), they increment counter.
-            // Subtracting `current_dirty` leaves those new increments intact. Correct.
 
             let (entries, current_dirty) = {
                 let guard = self.embeddings.read().unwrap();
@@ -253,86 +222,29 @@ impl VectorStore {
         self.save_vectors()
     }
 
-    /// Generate embedding for a text using HuggingFace Inference API
-    /// (Mocked if MOCK_EMBEDDINGS is set)
+    /// Generate embedding for a text using local model
     pub async fn embed(&self, text: &str) -> Result<Vec<f32>> {
-        if std::env::var("MOCK_EMBEDDINGS").is_ok() {
-            // Return random embedding for testing
-            use rand::Rng;
-            let mut rng = rand::rng();
-            let vec: Vec<f32> = (0..self.dimensions).map(|_| rng.random()).collect();
-            return Ok(vec);
-        }
-
         let embeddings = self.embed_batch(vec![text.to_string()]).await?;
         Ok(embeddings[0].clone())
     }
 
-    /// Generate embeddings for multiple texts using HuggingFace Inference API
+    /// Generate embeddings for multiple texts using local model
     pub async fn embed_batch(&self, texts: Vec<String>) -> Result<Vec<Vec<f32>>> {
         if texts.is_empty() {
             return Ok(Vec::new());
         }
 
-        if std::env::var("MOCK_EMBEDDINGS").is_ok() {
-            use rand::Rng;
-            let mut rng = rand::rng();
-            let mut results = Vec::new();
-            for _ in 0..texts.len() {
-                let vec: Vec<f32> = (0..self.dimensions).map(|_| rng.random()).collect();
-                results.push(vec);
-            }
-            return Ok(results);
-        }
-
-        let url = format!(
-            "{}/{}/pipeline/feature-extraction",
-            self.api_url, self.model
-        );
-
-        // HuggingFace accepts array of strings for inputs
-        let mut request = self.client.post(&url).json(&serde_json::json!({
-            "inputs": texts,
-        }));
-
-        // Add auth token if available
-        if let Some(ref token) = self.api_token {
-            request = request.header("Authorization", format!("Bearer {}", token));
-        }
-
-        let response = request.send().await?;
-
-        if !response.status().is_success() {
-            let error_text = response.text().await?;
-            anyhow::bail!("HuggingFace API error: {}", error_text);
-        }
-
-        let response_json: serde_json::Value = response.json().await?;
+        // Generate embeddings using local model (CPU)
+        // Note: model.embed is not async, but it's fast enough for small batches
+        // We could wrap it in spawn_blocking if needed, but for now we'll keep it simple
+        let embeddings = self.model.embed(texts, None)?;
+        
         let mut results = Vec::new();
-
-        if let Some(arr) = response_json.as_array() {
-            for item in arr {
-                let vec: Vec<f32> = serde_json::from_value(item.clone())
-                    .map_err(|e| anyhow::anyhow!("Failed to parse embedding: {}", e))?;
-
-                if vec.len() != self.dimensions {
-                    anyhow::bail!("Expected {} dimensions, got {}", self.dimensions, vec.len());
-                }
-                results.push(vec);
+        for item in embeddings {
+            if item.len() != self.dimensions {
+                anyhow::bail!("Expected {} dimensions, got {}", self.dimensions, item.len());
             }
-        } else {
-            // Handle case where we sent 1 text and got single flat array [0.1, ...]
-            if texts.len() == 1 {
-                if let Ok(vec) = serde_json::from_value::<Vec<f32>>(response_json) {
-                    if vec.len() == self.dimensions {
-                        results.push(vec);
-                    }
-                }
-            }
-        }
-
-        if results.len() != texts.len() {
-            anyhow::bail!("Expected {} embeddings, got {}", texts.len(), results.len());
+            results.push(item);
         }
 
         Ok(results)
@@ -377,7 +289,7 @@ impl VectorStore {
             return Ok(result_ids);
         }
 
-        // Generate embeddings via HuggingFace API
+        // Generate embeddings via fastembed
         let embeddings = self.embed_batch(new_items).await?;
 
         let mut ids_to_add = Vec::new();
@@ -431,7 +343,7 @@ impl VectorStore {
 
     /// Search for similar vectors
     pub async fn search(&self, query: &str, k: usize) -> Result<Vec<SearchResult>> {
-        // Generate query embedding via HuggingFace API
+        // Generate query embedding
         let query_embedding = self.embed(query).await?;
 
         // Search HNSW index
