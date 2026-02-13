@@ -1,0 +1,15 @@
+{
+  "setup": "python3 scripts/setup_synapse.py",
+  "mcpServers": {
+    "synapse": {
+      "command": "/home/robin/workspace/projects/synapse-engine/target/release/synapse",
+      "args": [
+        "--mcp"
+      ],
+      "env": {
+        "GRAPH_STORAGE_PATH": "/home/robin/workspace/projects/synapse-engine/data/graphs"
+      },
+      "description": "Synapse: High-performance neuro-symbolic knowledge graph for OpenClaw"
+    }
+  }
+}

@@ -1,0 +1,15 @@
+[Unit]
+Description=Synapse Neuro-symbolic Knowledge Graph
+After=network.target
+
+[Service]
+Type=simple
+User=%i
+Environment="SYNAPSE_AUTH_TOKENS={\"test\": [\"*\"]}"
+Environment="GRAPH_STORAGE_PATH=/var/lib/synapse/graphs"
+ExecStart=/usr/local/bin/synapse
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
