@@ -11,6 +11,7 @@ use proto::*;
 
 use crate::ingest::IngestionEngine;
 use crate::reasoner::{ReasoningStrategy as InternalStrategy, SynapseReasoner};
+use crate::scenarios::ScenarioManager;
 use crate::server::proto::{ReasoningStrategy, SearchMode};
 use crate::store::{IngestTriple, SynapseStore};
 use std::path::Path;
@@ -50,19 +51,97 @@ pub struct MySemanticEngine {
     pub stores: Arc<DashMap<String, Arc<SynapseStore>>>,
     pub auth: Arc<NamespaceAuth>,
     pub audit: Arc<InferenceAudit>,
+    pub scenario_manager: Arc<ScenarioManager>,
 }
 
 impl MySemanticEngine {
     pub fn new(storage_path: &str) -> Self {
         let auth = Arc::new(NamespaceAuth::new());
         auth.load_from_env();
+        let scenario_manager = Arc::new(ScenarioManager::new(std::path::Path::new(".")));
 
         Self {
             storage_path: storage_path.to_string(),
             stores: Arc::new(DashMap::new()),
             auth,
             audit: Arc::new(InferenceAudit::new()),
+            scenario_manager,
         }
+    }
+
+    pub async fn install_scenario(&self, name: &str, namespace: &str) -> Result<String, String> {
+        let path = self
+            .scenario_manager
+            .install_scenario(name)
+            .await
+            .map_err(|e| format!("Failed to install scenario assets: {}", e))?;
+
+        let store = self
+            .get_store(namespace)
+            .map_err(|e| e.message().to_string())?;
+
+        // Load Ontologies
+        let schema_path = path.join("schema");
+        let mut triples_loaded = 0;
+        if schema_path.exists() {
+            triples_loaded +=
+                crate::ingest::ontology::OntologyLoader::load_directory(&store, &schema_path)
+                    .await
+                    .map_err(|e| format!("Failed to load ontologies: {}", e))?;
+        }
+
+        // Load Data (Files)
+        let data_path = path.join("data");
+        let mut data_files_loaded = 0;
+        if data_path.exists() {
+            if let Ok(entries) = std::fs::read_dir(data_path) {
+                for entry in entries.flatten() {
+                    let p = entry.path();
+                    if p.is_file() {
+                        // Use ingestion engine
+                        let engine = IngestionEngine::new(store.clone());
+                        if let Ok(count) = engine.ingest_file(&p, namespace).await {
+                            triples_loaded += count as usize;
+                            data_files_loaded += 1;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Load Docs (RAG)
+        let docs_path = path.join("docs");
+        let mut docs_loaded = 0;
+        if docs_path.exists() {
+            if let Ok(entries) = std::fs::read_dir(docs_path) {
+                for entry in entries.flatten() {
+                    let p = entry.path();
+                    if p.is_file() {
+                        if let Ok(content) = std::fs::read_to_string(&p) {
+                            let processor = crate::processor::TextProcessor::new();
+                            let chunks = processor.chunk_text(&content, 1000, 150);
+                            if let Some(ref vector_store) = store.vector_store {
+                                for (i, chunk) in chunks.iter().enumerate() {
+                                    let chunk_uri = format!("file://{}#chunk-{}", p.display(), i);
+                                    let metadata = serde_json::json!({
+                                        "uri": format!("file://{}", p.display()),
+                                        "type": "doc_chunk",
+                                        "scenario": name
+                                    });
+                                    let _ = vector_store.add(&chunk_uri, chunk, metadata).await;
+                                }
+                                docs_loaded += 1;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(format!(
+            "Scenario '{}' installed. Loaded {} triples ({} data files) and {} docs.",
+            name, triples_loaded, data_files_loaded, docs_loaded
+        ))
     }
 
     pub async fn shutdown(&self) {
@@ -316,12 +395,12 @@ impl SemanticEngine for MySemanticEngine {
                                     _ => &obj_uri,
                                 };
 
-                                    // Always add to neighbors if not already in neighbors list to avoid duplicates there
-                                    // But we must allow revisiting nodes for graph expansion if we want to find paths?
-                                    // BFS typically avoids cycles by checking visited.
+                                // Always add to neighbors if not already in neighbors list to avoid duplicates there
+                                // But we must allow revisiting nodes for graph expansion if we want to find paths?
+                                // BFS typically avoids cycles by checking visited.
 
-                                    // NOTE: visited set prevents processing same node twice in BFS.
-                                    // If we reach a node that was already visited in a previous layer (or this layer), skip it.
+                                // NOTE: visited set prevents processing same node twice in BFS.
+                                // If we reach a node that was already visited in a previous layer (or this layer), skip it.
                                 if !visited.contains(&obj_uri) {
                                     visited.insert(obj_uri.clone());
                                     let obj_id = store.get_or_create_id(&obj_uri);
@@ -329,7 +408,7 @@ impl SemanticEngine for MySemanticEngine {
                                     let mut neighbor_score = base_score;
                                     if req.scoring_strategy == "degree" {
                                         let degree = store.get_degree(clean_uri);
-                                            neighbor_score /= (degree as f32 + 1.0).ln().max(0.1);
+                                        neighbor_score /= (degree as f32 + 1.0).ln().max(0.1);
                                     }
 
                                     neighbors.push(Neighbor {

@@ -1,0 +1,14 @@
+[
+  {
+    "name": "core",
+    "description": "Essential ontologies for Synapse.",
+    "version": "1.0.0",
+    "location": "https://raw.githubusercontent.com/pmaojo/synapse-engine/main/scenarios/core"
+  },
+  {
+    "name": "research-assistant",
+    "description": "Academic research assistant scenario.",
+    "version": "1.0.0",
+    "location": "https://raw.githubusercontent.com/pmaojo/synapse-engine/main/scenarios/research-assistant"
+  }
+]

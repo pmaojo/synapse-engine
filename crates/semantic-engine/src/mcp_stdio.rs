@@ -1,8 +1,8 @@
 use crate::mcp_types::{
     CallToolResult, Content, DegreeResult, DisambiguationItem, DisambiguationResult,
     IngestToolResult, ListToolsResult, McpError, McpRequest, McpResponse, NeighborItem,
-    NeighborsToolResult, ReasoningToolResult, SearchResultItem, SearchToolResult,
-    SimpleSuccessResult, StatsToolResult, Tool, TripleItem, TriplesToolResult,
+    NeighborsToolResult, ReasoningToolResult, ScenarioItem, ScenarioListResult, SearchResultItem,
+    SearchToolResult, SimpleSuccessResult, StatsToolResult, Tool, TripleItem, TriplesToolResult,
 };
 use crate::server::proto::semantic_engine_server::SemanticEngine;
 use crate::server::proto::{
@@ -274,6 +274,28 @@ impl McpStdioServer {
                     "required": ["url", "name"]
                 }),
             },
+            Tool {
+                name: "list_scenarios".to_string(),
+                description: Some("List available scenarios in the marketplace".to_string()),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {}
+                }),
+            },
+            Tool {
+                name: "install_scenario".to_string(),
+                description: Some(
+                    "Install a scenario (ontologies, data, docs) from the marketplace".to_string(),
+                ),
+                input_schema: serde_json::json!({
+                    "type": "object",
+                    "properties": {
+                        "name": { "type": "string", "description": "Name of the scenario to install" },
+                        "namespace": { "type": "string", "default": "default" }
+                    },
+                    "required": ["name"]
+                }),
+            },
         ]
     }
 
@@ -387,7 +409,52 @@ impl McpStdioServer {
             "disambiguate" => self.call_disambiguate(request.id, &arguments).await,
             "get_node_degree" => self.call_get_node_degree(request.id, &arguments).await,
             "install_ontology" => self.call_install_ontology(request.id, &arguments).await,
+            "list_scenarios" => self.call_list_scenarios(request.id).await,
+            "install_scenario" => self.call_install_scenario(request.id, &arguments).await,
             _ => self.error_response(request.id, -32602, &format!("Unknown tool: {}", tool_name)),
+        }
+    }
+
+    async fn call_list_scenarios(&self, id: Option<serde_json::Value>) -> McpResponse {
+        match self.engine.scenario_manager.list_scenarios().await {
+            Ok(registry) => {
+                let items: Vec<ScenarioItem> = registry
+                    .into_iter()
+                    .map(|e| ScenarioItem {
+                        name: e.name,
+                        description: e.description,
+                        version: e.version,
+                    })
+                    .collect();
+                self.serialize_result(id, ScenarioListResult { scenarios: items })
+            }
+            Err(e) => self.tool_result(id, &e.to_string(), true),
+        }
+    }
+
+    async fn call_install_scenario(
+        &self,
+        id: Option<serde_json::Value>,
+        args: &serde_json::Map<String, serde_json::Value>,
+    ) -> McpResponse {
+        let name = match args.get("name").and_then(|v| v.as_str()) {
+            Some(n) => n,
+            None => return self.error_response(id, -32602, "Missing 'name'"),
+        };
+        let namespace = args
+            .get("namespace")
+            .and_then(|v| v.as_str())
+            .unwrap_or("default");
+
+        match self.engine.install_scenario(name, namespace).await {
+            Ok(msg) => {
+                let result = SimpleSuccessResult {
+                    success: true,
+                    message: msg,
+                };
+                self.serialize_result(id, result)
+            }
+            Err(e) => self.tool_result(id, &e, true),
         }
     }
 
@@ -452,7 +519,11 @@ impl McpStdioServer {
         };
 
         if clean_name != name {
-             return self.tool_result(id, "Security error: Filename contains path components", true);
+            return self.tool_result(
+                id,
+                "Security error: Filename contains path components",
+                true,
+            );
         }
 
         let path = ontology_dir.join(clean_name);

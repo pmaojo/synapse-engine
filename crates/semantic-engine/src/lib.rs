@@ -7,6 +7,7 @@ pub mod mcp_types;
 pub mod persistence;
 pub mod processor;
 pub mod reasoner;
+pub mod scenarios;
 pub mod server;
 pub mod store;
 pub mod vector_store;

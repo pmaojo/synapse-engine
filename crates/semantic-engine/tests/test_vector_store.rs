@@ -1,5 +1,5 @@
 use std::env;
-use synapse_core::store::{IngestTriple, Provenance, SynapseStore};
+use synapse_core::store::{IngestTriple, SynapseStore};
 
 #[tokio::test]
 async fn test_vector_synchronization() {
