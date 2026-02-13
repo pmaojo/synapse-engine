@@ -2,11 +2,17 @@
 # Start Synapse gRPC server with authentication token
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SYNAPSE_BIN="$SCRIPT_DIR/bin/synapse"
+# Prefer target/release if available, otherwise bin/synapse
+if [ -f "$SCRIPT_DIR/target/release/synapse" ]; then
+    SYNAPSE_BIN="$SCRIPT_DIR/target/release/synapse"
+else
+    SYNAPSE_BIN="$SCRIPT_DIR/bin/synapse"
+fi
 LOG_FILE="$SCRIPT_DIR/synapse_grpc.log"
 PID_FILE="$SCRIPT_DIR/synapse.pid"
 STORAGE_PATH="$SCRIPT_DIR/data/graphs"
 AUTH_TOKENS='{"test": ["*"]}'
+MOCK_EMBEDDINGS=${MOCK_EMBEDDINGS:-"true"}
 
 # Check if synapse binary exists
 if [ ! -f "$SYNAPSE_BIN" ]; then
@@ -31,6 +37,7 @@ mkdir -p "$STORAGE_PATH"
 
 # Start synapse
 export SYNAPSE_AUTH_TOKENS="$AUTH_TOKENS"
+export MOCK_EMBEDDINGS="$MOCK_EMBEDDINGS"
 nohup "$SYNAPSE_BIN" > "$LOG_FILE" 2>&1 &
 SYNAPSE_PID=$!
 
