@@ -1,3 +1,12 @@
+---
+name: synapse
+description: "Synapse: High-performance neuro-symbolic knowledge graph for OpenClaw. Provides structured long-term memory, reasoning, and hybrid search."
+license: MIT
+metadata:
+  version: "0.6.0"
+  author: pmaojo
+---
+
 # SKILL: synapse
 
 Synapse es el motor semántico neuro-simbólico de Robin (OpenClaw). Proporciona memoria a largo plazo estructurada, razonamiento y búsqueda híbrida.
