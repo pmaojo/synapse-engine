@@ -1,5 +1,6 @@
 use crate::persistence::{load_bincode, save_bincode};
 use anyhow::Result;
+use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
 use hnsw::Hnsw;
 use rand_pcg::Pcg64;
 use reqwest::Client;
@@ -7,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, Mutex, RwLock};
 
 const HUGGINGFACE_API_URL: &str = "https://router.huggingface.co/hf-inference/models";
 const DEFAULT_MODEL: &str = "sentence-transformers/all-MiniLM-L6-v2"; // 384 dims, fast
@@ -76,6 +77,8 @@ pub struct VectorStore {
     dirty_count: Arc<AtomicUsize>,
     /// Threshold for auto-save
     auto_save_threshold: usize,
+    /// Local embedding model (optional)
+    local_model: Option<Arc<Mutex<TextEmbedding>>>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -190,6 +193,16 @@ impl VectorStore {
             .build()
             .unwrap_or_else(|_| Client::new());
 
+        let local_model = if api_token.is_none() && std::env::var("MOCK_EMBEDDINGS").is_err() {
+            eprintln!("Initializing local embedding model (this may take a moment to download)...");
+            let model = TextEmbedding::try_new(
+                InitOptions::new(EmbeddingModel::AllMiniLML6V2).with_show_download_progress(true),
+            )?;
+            Some(Arc::new(Mutex::new(model)))
+        } else {
+            None
+        };
+
         Ok(Self {
             index: Arc::new(RwLock::new(index)),
             id_to_key: Arc::new(RwLock::new(id_to_key)),
@@ -204,6 +217,7 @@ impl VectorStore {
             embeddings: Arc::new(RwLock::new(embeddings)),
             dirty_count: Arc::new(AtomicUsize::new(0)),
             auto_save_threshold: DEFAULT_AUTO_SAVE_THRESHOLD,
+            local_model,
         })
     }
 
@@ -283,6 +297,17 @@ impl VectorStore {
                 results.push(vec);
             }
             return Ok(results);
+        }
+
+        if let Some(ref model) = self.local_model {
+            let model = model.clone();
+            let texts = texts.clone();
+            let embeddings = tokio::task::spawn_blocking(move || {
+                let mut model = model.lock().unwrap();
+                model.embed(texts, None)
+            })
+            .await??;
+            return Ok(embeddings);
         }
 
         let url = format!(
