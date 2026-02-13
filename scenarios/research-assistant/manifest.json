@@ -1,0 +1,8 @@
+{
+  "name": "research-assistant",
+  "version": "1.0.0",
+  "description": "Ontology and guidelines for an academic research assistant scenario.",
+  "ontologies": ["research.owl"],
+  "data_files": [],
+  "docs": ["guide.md"]
+}

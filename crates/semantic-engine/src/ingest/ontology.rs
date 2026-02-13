@@ -65,7 +65,7 @@ impl OntologyLoader {
         let mut ingest_triples = Vec::new();
 
         for triple_result in parser.read_triples(reader)? {
-             let triple = triple_result.map_err(|e| anyhow::anyhow!("Parse error: {}", e))?;
+            let triple = triple_result.map_err(|e| anyhow::anyhow!("Parse error: {}", e))?;
 
             ingest_triples.push(IngestTriple {
                 subject: triple.subject.to_string(),
