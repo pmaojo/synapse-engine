@@ -30,7 +30,8 @@ It is designed to work seamlessly with **OpenClaw** and other agentic frameworks
   - **MCP Server** for seamless LLM agent integration
 - **OWL Reasoning**: Built-in support for OWL 2 RL reasoning via `reasonable` crate
 - **Hybrid Search**: Combines vector similarity with graph traversal (using local HNSW index)
-- **HuggingFace API Integration**: High-performance embeddings without local GPU/CPU heavy lifting
+- **Local Embedding Model**: Uses `fastembed-rs` (all-MiniLM-L6-v2) by default for low-latency, offline embeddings.
+- **HuggingFace API Integration**: Optional integration for higher throughput or custom models.
 - **High Performance**: Written in Rust with async I/O and efficient HNSW indexing
 - **Persistent Storage**: Automatic persistence with namespace-specific storage paths
 - **Granular Security**: Token-based authorization for Read, Write, Delete, and Reason operations.
@@ -346,7 +347,7 @@ This enables multi-tenant scenarios and context separation.
 | Variable                | Default       | Description                                  |
 | ----------------------- | ------------- | -------------------------------------------- |
 | `GRAPH_STORAGE_PATH`    | `data/graphs` | Root directory for namespace storage         |
-| `HUGGINGFACE_API_TOKEN` | `(optional)`  | Token for Inference API (higher rate limits) |
+| `HUGGINGFACE_API_TOKEN` | `(optional)`  | If set, uses HF API. If unset, uses local model (downloads on first run). |
 
 ### Storage Structure
 
