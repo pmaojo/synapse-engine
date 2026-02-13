@@ -8,15 +8,20 @@ __pycache__/
 *$py.class
 .venv/
 venv/
+venv-embeddings/
+test_venv/
 ENV/
 env/
 .env
 
 # Storage
-data/*.bin
-data/*.db
-data/graphs/*
-!data/graphs/.gitkeep
+**/data/*.bin
+**/data/*.db
+**/data/graphs/**/*
+!**/data/graphs/.gitkeep
+**/data/sessions/
+**/data/*.jsonl
+.fastembed_cache/
 
 # IDE
 .vscode/
@@ -28,3 +33,4 @@ data/graphs/*
 # Logs
 logs/
 *.log
+*.txt

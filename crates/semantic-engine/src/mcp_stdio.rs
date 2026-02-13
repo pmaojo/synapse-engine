@@ -40,10 +40,18 @@ impl McpStdioServer {
             }
 
             if let Ok(request) = serde_json::from_str::<McpRequest>(trimmed) {
+                let is_notification = request.id.is_none();
                 let response = self.handle_request(request).await;
-                let response_json = serde_json::to_string(&response)? + "\n";
-                writer.write_all(response_json.as_bytes()).await?;
-                writer.flush().await?;
+                
+                // Only send response if it's not a notification
+                if !is_notification {
+                    let response_json = serde_json::to_string(&response)? + "\n";
+                    writer.write_all(response_json.as_bytes()).await?;
+                    writer.flush().await?;
+                }
+            } else {
+                // Log failed parse to stderr but don't crash
+                eprintln!("MCP PROTOCOL ERROR: Failed to parse line: {}", trimmed);
             }
         }
 
@@ -373,7 +381,8 @@ impl McpStdioServer {
 
     async fn handle_tool_call(&self, request: McpRequest) -> McpResponse {
         let params = match request.params {
-            Some(p) => p,
+            Some(serde_json::Value::Object(map)) => map,
+            Some(_) => return self.error_response(request.id, -32602, "Params must be an object"),
             None => return self.error_response(request.id, -32602, "Missing params"),
         };
 

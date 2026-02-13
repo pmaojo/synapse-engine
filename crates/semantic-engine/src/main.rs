@@ -15,17 +15,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let engine = MySemanticEngine::new(&storage_path);
 
-    // Ensure 'core' scenario is installed on startup
-    match engine.install_scenario("core", "default").await {
-        Ok(msg) => {
-            if is_mcp {
-                eprintln!("{}", msg);
-            } else {
-                println!("{}", msg);
-            }
+    // Ensure 'core' scenario is installed on startup (backgrounded for MCP performance)
+    let engine_init = engine.clone();
+    tokio::spawn(async move {
+        match engine_init.install_scenario("core", "default").await {
+            Ok(msg) => eprintln!("{}", msg),
+            Err(e) => eprintln!("Failed to load core scenario: {}", e),
         }
-        Err(e) => eprintln!("Failed to load core scenario: {}", e),
-    }
+    });
 
     if is_mcp {
         // MCP mode: no stdout messages, only JSON-RPC

@@ -1,6 +1,6 @@
 [package]
 name = "synapse-core"
-version = "0.7.0"
+version = "0.8.1"
 edition.workspace = true
 description = "A neuro-symbolic semantic engine for OpenClaw, combining graph databases with vector operations."
 readme = "README.md"
