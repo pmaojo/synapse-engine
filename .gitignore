@@ -15,7 +15,7 @@ env/
 # Storage
 data/*.bin
 data/*.db
-data/graphs/*.bin
+data/graphs/*
 !data/graphs/.gitkeep
 
 # IDE

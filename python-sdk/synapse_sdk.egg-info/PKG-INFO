@@ -1,6 +1,6 @@
 Metadata-Version: 2.4
 Name: synapse-sdk
-Version: 0.4.1
+Version: 0.6.0
 Summary: Python SDK for Synapse Semantic Engine
 Author-email: Pelayo Maojo <pelayo.mao@gmail.com>
 Requires-Python: >=3.10

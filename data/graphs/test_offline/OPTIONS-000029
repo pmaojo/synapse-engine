@@ -16,7 +16,7 @@
   avoid_flush_during_shutdown=false
   max_background_flushes=-1
   delayed_write_rate=16777216
-  max_open_files=1048528
+  max_open_files=976
   max_subcompactions=1
   writable_file_max_buffer_size=1048576
   wal_bytes_per_sync=0
@@ -90,7 +90,7 @@
   write_thread_max_yield_usec=100
   advise_random_on_open=true
   info_log_level=WARN_LEVEL
-  
+
 
 [CFOptions "default"]
   memtable_max_range_deletions=0
@@ -123,7 +123,7 @@
   target_file_size_base=67108864
   level0_file_num_compaction_trigger=2
   max_compaction_bytes=1677721600
-  disable_auto_compactions=false
+  disable_auto_compactions=true
   check_flush_compaction_key_order=true
   min_blob_size=0
   memtable_whole_key_filtering=false
@@ -169,7 +169,7 @@
   bloom_locality=0
   comparator=leveldb.BytewiseComparator
   compaction_filter_factory=nullptr
-  
+
 [TableOptions/BlockBasedTable "default"]
   initial_auto_readahead_size=8192
   pin_top_level_index_and_filter=true
@@ -202,7 +202,7 @@
   metadata_cache_options={unpartitioned_pinning=kFallback;partition_pinning=kFallback;top_level_index_pinning=kFallback;}
   read_amp_bytes_per_bit=0
   enable_index_compression=true
-  
+
 
 [CFOptions "id2str"]
   memtable_max_range_deletions=0
@@ -281,7 +281,7 @@
   bloom_locality=0
   comparator=leveldb.BytewiseComparator
   compaction_filter_factory=nullptr
-  
+
 [TableOptions/BlockBasedTable "id2str"]
   initial_auto_readahead_size=8192
   pin_top_level_index_and_filter=true
@@ -314,7 +314,7 @@
   metadata_cache_options={unpartitioned_pinning=kFallback;partition_pinning=kFallback;top_level_index_pinning=kFallback;}
   read_amp_bytes_per_bit=0
   enable_index_compression=true
-  
+
 
 [CFOptions "spog"]
   memtable_max_range_deletions=0
@@ -393,7 +393,7 @@
   bloom_locality=0
   comparator=leveldb.BytewiseComparator
   compaction_filter_factory=nullptr
-  
+
 [TableOptions/BlockBasedTable "spog"]
   initial_auto_readahead_size=8192
   pin_top_level_index_and_filter=true
@@ -426,7 +426,7 @@
   metadata_cache_options={unpartitioned_pinning=kFallback;partition_pinning=kFallback;top_level_index_pinning=kFallback;}
   read_amp_bytes_per_bit=0
   enable_index_compression=true
-  
+
 
 [CFOptions "posg"]
   memtable_max_range_deletions=0
@@ -505,7 +505,7 @@
   bloom_locality=0
   comparator=leveldb.BytewiseComparator
   compaction_filter_factory=nullptr
-  
+
 [TableOptions/BlockBasedTable "posg"]
   initial_auto_readahead_size=8192
   pin_top_level_index_and_filter=true
@@ -538,7 +538,7 @@
   metadata_cache_options={unpartitioned_pinning=kFallback;partition_pinning=kFallback;top_level_index_pinning=kFallback;}
   read_amp_bytes_per_bit=0
   enable_index_compression=true
-  
+
 
 [CFOptions "ospg"]
   memtable_max_range_deletions=0
@@ -617,7 +617,7 @@
   bloom_locality=0
   comparator=leveldb.BytewiseComparator
   compaction_filter_factory=nullptr
-  
+
 [TableOptions/BlockBasedTable "ospg"]
   initial_auto_readahead_size=8192
   pin_top_level_index_and_filter=true
@@ -650,7 +650,7 @@
   metadata_cache_options={unpartitioned_pinning=kFallback;partition_pinning=kFallback;top_level_index_pinning=kFallback;}
   read_amp_bytes_per_bit=0
   enable_index_compression=true
-  
+
 
 [CFOptions "gspo"]
   memtable_max_range_deletions=0
@@ -729,7 +729,7 @@
   bloom_locality=0
   comparator=leveldb.BytewiseComparator
   compaction_filter_factory=nullptr
-  
+
 [TableOptions/BlockBasedTable "gspo"]
   initial_auto_readahead_size=8192
   pin_top_level_index_and_filter=true
@@ -762,7 +762,7 @@
   metadata_cache_options={unpartitioned_pinning=kFallback;partition_pinning=kFallback;top_level_index_pinning=kFallback;}
   read_amp_bytes_per_bit=0
   enable_index_compression=true
-  
+
 
 [CFOptions "gpos"]
   memtable_max_range_deletions=0
@@ -841,7 +841,7 @@
   bloom_locality=0
   comparator=leveldb.BytewiseComparator
   compaction_filter_factory=nullptr
-  
+
 [TableOptions/BlockBasedTable "gpos"]
   initial_auto_readahead_size=8192
   pin_top_level_index_and_filter=true
@@ -874,7 +874,7 @@
   metadata_cache_options={unpartitioned_pinning=kFallback;partition_pinning=kFallback;top_level_index_pinning=kFallback;}
   read_amp_bytes_per_bit=0
   enable_index_compression=true
-  
+
 
 [CFOptions "gosp"]
   memtable_max_range_deletions=0
@@ -953,7 +953,7 @@
   bloom_locality=0
   comparator=leveldb.BytewiseComparator
   compaction_filter_factory=nullptr
-  
+
 [TableOptions/BlockBasedTable "gosp"]
   initial_auto_readahead_size=8192
   pin_top_level_index_and_filter=true
@@ -986,7 +986,7 @@
   metadata_cache_options={unpartitioned_pinning=kFallback;partition_pinning=kFallback;top_level_index_pinning=kFallback;}
   read_amp_bytes_per_bit=0
   enable_index_compression=true
-  
+
 
 [CFOptions "dspo"]
   memtable_max_range_deletions=0
@@ -1065,7 +1065,7 @@
   bloom_locality=0
   comparator=leveldb.BytewiseComparator
   compaction_filter_factory=nullptr
-  
+
 [TableOptions/BlockBasedTable "dspo"]
   initial_auto_readahead_size=8192
   pin_top_level_index_and_filter=true
@@ -1098,7 +1098,7 @@
   metadata_cache_options={unpartitioned_pinning=kFallback;partition_pinning=kFallback;top_level_index_pinning=kFallback;}
   read_amp_bytes_per_bit=0
   enable_index_compression=true
-  
+
 
 [CFOptions "dpos"]
   memtable_max_range_deletions=0
@@ -1177,7 +1177,7 @@
   bloom_locality=0
   comparator=leveldb.BytewiseComparator
   compaction_filter_factory=nullptr
-  
+
 [TableOptions/BlockBasedTable "dpos"]
   initial_auto_readahead_size=8192
   pin_top_level_index_and_filter=true
@@ -1210,7 +1210,7 @@
   metadata_cache_options={unpartitioned_pinning=kFallback;partition_pinning=kFallback;top_level_index_pinning=kFallback;}
   read_amp_bytes_per_bit=0
   enable_index_compression=true
-  
+
 
 [CFOptions "dosp"]
   memtable_max_range_deletions=0
@@ -1289,7 +1289,7 @@
   bloom_locality=0
   comparator=leveldb.BytewiseComparator
   compaction_filter_factory=nullptr
-  
+
 [TableOptions/BlockBasedTable "dosp"]
   initial_auto_readahead_size=8192
   pin_top_level_index_and_filter=true
@@ -1322,7 +1322,7 @@
   metadata_cache_options={unpartitioned_pinning=kFallback;partition_pinning=kFallback;top_level_index_pinning=kFallback;}
   read_amp_bytes_per_bit=0
   enable_index_compression=true
-  
+
 
 [CFOptions "graphs"]
   memtable_max_range_deletions=0
@@ -1401,7 +1401,7 @@
   bloom_locality=0
   comparator=leveldb.BytewiseComparator
   compaction_filter_factory=nullptr
-  
+
 [TableOptions/BlockBasedTable "graphs"]
   initial_auto_readahead_size=8192
   pin_top_level_index_and_filter=true
@@ -1434,4 +1434,3 @@
   metadata_cache_options={unpartitioned_pinning=kFallback;partition_pinning=kFallback;top_level_index_pinning=kFallback;}
   read_amp_bytes_per_bit=0
   enable_index_compression=true
-  
