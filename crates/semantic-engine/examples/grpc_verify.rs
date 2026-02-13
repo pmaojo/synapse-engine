@@ -3,7 +3,6 @@ use synapse_core::server::proto::{
     HybridSearchRequest, IngestRequest, Provenance, ReasoningRequest, ReasoningStrategy,
     SearchMode, Triple,
 };
-use tonic::transport::Channel;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {

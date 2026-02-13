@@ -1,0 +1,60 @@
+<?xml version="1.0"?>
+<rdf:RDF xmlns="http://synapse.os/memory#"
+     xml:base="http://synapse.os/memory"
+     xmlns:owl="http://www.w3.org/2002/07/owl#"
+     xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+     xmlns:xml="http://www.w3.org/XML/1998/namespace"
+     xmlns:xsd="http://www.w3.org/2001/XMLSchema#"
+     xmlns:rdfs="http://www.w3.org/2000/01/rdf-schema#"
+     xmlns:prov="http://www.w3.org/ns/prov#">
+    <owl:Ontology rdf:about="http://synapse.os/memory">
+        <owl:imports rdf:resource="http://www.w3.org/ns/prov"/>
+    </owl:Ontology>
+
+    <!-- Classes -->
+    <owl:Class rdf:about="http://synapse.os/memory#Conversation">
+        <rdfs:subClassOf rdf:resource="http://www.w3.org/ns/prov#Activity"/>
+        <rdfs:comment>An interaction between an agent and a user.</rdfs:comment>
+    </owl:Class>
+
+    <owl:Class rdf:about="http://synapse.os/memory#UserInstruction">
+        <rdfs:subClassOf rdf:resource="http://www.w3.org/ns/prov#Entity"/>
+        <rdfs:comment>A specific instruction given by a user.</rdfs:comment>
+    </owl:Class>
+
+    <owl:Class rdf:about="http://synapse.os/memory#AgentAction">
+        <rdfs:subClassOf rdf:resource="http://www.w3.org/ns/prov#Activity"/>
+        <rdfs:comment>An action taken by the agent in response to an instruction or event.</rdfs:comment>
+    </owl:Class>
+
+    <owl:Class rdf:about="http://synapse.os/memory#MemoryItem">
+        <rdfs:subClassOf rdf:resource="http://www.w3.org/ns/prov#Entity"/>
+        <rdfs:comment>A general item stored in episodic memory.</rdfs:comment>
+    </owl:Class>
+
+    <!-- Properties -->
+    <owl:ObjectProperty rdf:about="http://synapse.os/memory#relatedTo">
+        <rdfs:domain rdf:resource="http://synapse.os/memory#MemoryItem"/>
+        <rdfs:range rdf:resource="http://www.w3.org/2002/07/owl#Thing"/>
+        <rdfs:comment>Links a memory item to related concepts or entities.</rdfs:comment>
+    </owl:ObjectProperty>
+
+    <owl:ObjectProperty rdf:about="http://synapse.os/memory#happenedAt">
+        <rdfs:domain rdf:resource="http://synapse.os/memory#AgentAction"/>
+        <rdfs:range rdf:resource="http://schema.org/Place"/>
+        <rdfs:comment>Where the action took place (virtual or physical).</rdfs:comment>
+    </owl:ObjectProperty>
+
+    <owl:ObjectProperty rdf:about="http://synapse.os/memory#triggeredBy">
+        <rdfs:domain rdf:resource="http://synapse.os/memory#AgentAction"/>
+        <rdfs:range rdf:resource="http://synapse.os/memory#UserInstruction"/>
+        <rdfs:comment>The instruction that triggered this action.</rdfs:comment>
+    </owl:ObjectProperty>
+
+    <owl:DatatypeProperty rdf:about="http://synapse.os/memory#content">
+        <rdfs:domain rdf:resource="http://synapse.os/memory#UserInstruction"/>
+        <rdfs:range rdf:resource="http://www.w3.org/2001/XMLSchema#string"/>
+        <rdfs:comment>The text content of the instruction.</rdfs:comment>
+    </owl:DatatypeProperty>
+
+</rdf:RDF>

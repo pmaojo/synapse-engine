@@ -7,9 +7,9 @@
 -   **Blazing Fast Core**: Powered by Rust and [Oxigraph](https://github.com/oxigraph/oxigraph) for low-latency graph operations.
 -   **Neuro-symbolic Search**: Hybrid retrieval combining vector similarity with graph traversal expansion.
 -   **Reasoning Engine**: Built-in OWL-RL and RDFS reasoning strategies to derive implicit knowledge.
--   **Multi-Tenancy**: Native support for isolated namespaces (e.g., `work`, `personal`, `os`).
+-   **Scenario Marketplace**: (v0.6.0) Dynamic loading of domain-specific "scenarios" (ontologies + data + docs) to instantly equip agents with specialized knowledge.
 -   **Native MCP**: Seamlessly integrates as a [Model Context Protocol](https://modelcontextprotocol.io) server.
--   **Ontology-Driven**: Automatically loads standard ontologies (Schema.org, PROV-O, etc.) to structure knowledge.
+-   **Ontology-Driven**: Automatically loads standard ontologies (Schema.org, PROV-O, etc.) via the `core` scenario.
 
 ## 📦 Installation & Setup
 
@@ -20,7 +20,7 @@ npx skills install pmaojo/synapse-engine
 *Note: During installation, you will be prompted to set Synapse as your default memory provider.*
 
 ### Python SDK
-v0.5.2 introduces the official high-level SDK:
+v0.6.0 introduces the official high-level SDK:
 ```bash
 pip install ./python-sdk
 ```
@@ -45,7 +45,7 @@ client.ingest_triples([
 results = client.hybrid_search("What is Pelayo's expertise?", namespace="work")
 ```
 
-### MCP Integration (v0.5.2)
+### MCP Integration
 Add Synapse to your `openclaw.json` (or Cursor/Claude Desktop) to enable direct LLM access to your knowledge graph:
 
 ```json
@@ -61,32 +61,32 @@ Add Synapse to your `openclaw.json` (or Cursor/Claude Desktop) to enable direct 
 ```
 
 #### Available Tools:
+- `list_scenarios`: Browse the Scenario Marketplace.
+- `install_scenario`: Install a domain package (e.g., `research-assistant`).
 - `ingest_triples`: Direct RDF ingestion.
 - `sparql_query`: Complex graph querying.
 - `hybrid_search`: Semantic + structural retrieval.
 - `apply_reasoning`: Trigger OWL-RL/RDFS inference.
 - `ingest_url`: Automated scraping and embedding.
-- `install_ontology`: Download and install new ontologies from the web.
 
-## 📚 Ontologies & Semantic Memory
+## 📚 Scenario Marketplace (New in v0.6.0)
 
-Synapse comes pre-loaded with essential ontologies to help Agents understand the world "out-of-the-box":
+Synapse now supports a **Scenario Marketplace**, allowing agents to dynamically install knowledge packages. A Scenario bundles:
+1.  **Ontologies**: Formal schema definitions (OWL).
+2.  **Seed Data**: Initial knowledge graph triples.
+3.  **Documentation**: Text guides automatically indexed for RAG retrieval.
 
-*   **Schema.org** (`schema.owl`): Core definitions for Person, Action, Event, Organization.
-*   **PROV-O** (`prov.owl`): Provenance ontology to track where knowledge comes from (e.g., `wasDerivedFrom`, `generatedAtTime`).
-*   **Memory Ontology** (`memory.owl`): Specialized for Episodic Memory (`Conversation`, `UserInstruction`, `AgentAction`).
-*   **SKOS** (`skos.owl`): Simple Knowledge Organization System for concepts and tesaurus.
-*   **FOAF** (`foaf.owl`): Friend of a Friend for social connections.
+### Built-in Scenarios:
+*   **Core**: Essential ontologies (Schema.org, PROV-O, SKOS, FOAF, Memory) loaded by default.
+*   **Research Assistant**: Specialized ontology for academic papers and authors.
 
-These files are located in `ontology/` and are automatically loaded into the `default` namespace on startup.
-
-To add a new ontology dynamically via MCP:
+To install a scenario via MCP:
 ```json
 {
-  "name": "install_ontology",
+  "name": "install_scenario",
   "arguments": {
-    "url": "https://raw.githubusercontent.com/ad-hoc-network/legal-ontology/main/legal.owl",
-    "name": "legal.owl"
+    "name": "research-assistant",
+    "namespace": "my-research"
   }
 }
 ```
@@ -104,7 +104,7 @@ openclaw cron add --name "Notion Sync" --every "1h" --message "Sync recent Notio
 ## 🏗️ Technical Architecture
 
 ### 1. Ontology-Driven Validation
-Ontologies are defined in standard OWL format (`ontology/*.owl`). Synapse uses these schemas to validate incoming triples, ensuring semantic consistency (domain/range checks) and preventing logical contradictions.
+Ontologies are defined in standard OWL format. Synapse uses these schemas to validate incoming triples, ensuring semantic consistency (domain/range checks) and preventing logical contradictions.
 
 ### 2. The Synapse Reasoner
 The Rust core implements a multi-strategy reasoner:

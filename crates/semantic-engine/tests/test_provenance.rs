@@ -23,7 +23,7 @@ async fn test_provenance_persistence() {
         provenance: Some(prov.clone()),
     };
 
-    let (nodes, edges) = store.ingest_triples(vec![triple]).await.unwrap();
+    let (nodes, _edges) = store.ingest_triples(vec![triple]).await.unwrap();
     // In our implementation, we add edges. We don't distinguish node addition in the return value currently (always returns added, 0).
     assert_eq!(nodes, 1);
 
