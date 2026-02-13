@@ -91,6 +91,27 @@ To install a scenario via MCP:
 }
 ```
 
+## 🔌 Offline Mode
+
+Synapse supports full offline operation by running a local embedding server instead of relying on the HuggingFace Inference API.
+
+### 1. Start the Local Embedding Server
+We provide a lightweight server compatible with the HuggingFace API spec:
+
+```bash
+# Start the server (dependencies are installed with requirements.txt)
+python scripts/local_embedding_server.py
+```
+*This will download the model (default: `sentence-transformers/all-MiniLM-L6-v2`) on first run and cache it locally.*
+
+### 2. Configure Synapse
+Set the `HUGGINGFACE_API_URL` environment variable to point to your local server:
+
+```bash
+export HUGGINGFACE_API_URL="http://localhost:8000"
+./start_rust_server.sh
+```
+
 ## 🌐 Notion Sync: Automated Memory
 
 Synapse can automatically distill your Notion notes into formal knowledge using LLM-driven extraction.

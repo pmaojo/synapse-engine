@@ -62,6 +62,8 @@ pub struct VectorStore {
     storage_path: Option<PathBuf>,
     /// HTTP client for HuggingFace API
     client: Client,
+    /// HuggingFace API URL (configurable)
+    api_url: String,
     /// HuggingFace API token (optional, for rate limits)
     api_token: Option<String>,
     /// Model name
@@ -178,6 +180,10 @@ impl VectorStore {
         // Get API token from environment (optional)
         let api_token = std::env::var("HUGGINGFACE_API_TOKEN").ok();
 
+        // Get API URL from environment (or default)
+        let api_url = std::env::var("HUGGINGFACE_API_URL")
+            .unwrap_or_else(|_| HUGGINGFACE_API_URL.to_string());
+
         // Configured client with timeout
         let client = Client::builder()
             .timeout(std::time::Duration::from_secs(30))
@@ -191,6 +197,7 @@ impl VectorStore {
             key_to_metadata: Arc::new(RwLock::new(key_to_metadata)),
             storage_path,
             client,
+            api_url,
             api_token,
             model: DEFAULT_MODEL.to_string(),
             dimensions,
@@ -280,7 +287,7 @@ impl VectorStore {
 
         let url = format!(
             "{}/{}/pipeline/feature-extraction",
-            HUGGINGFACE_API_URL, self.model
+            self.api_url, self.model
         );
 
         // HuggingFace accepts array of strings for inputs
