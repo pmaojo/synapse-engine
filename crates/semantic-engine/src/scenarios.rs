@@ -104,6 +104,12 @@ impl ScenarioManager {
     }
 
     async fn install_from_local_path(&self, source: &Path, dest: &Path) -> Result<PathBuf> {
+        // Prevent self-copy
+        if source.canonicalize()? == dest.canonicalize().unwrap_or(dest.to_path_buf()) {
+            eprintln!("Source and destination are the same, skipping copy.");
+            return Ok(dest.to_path_buf());
+        }
+
         // 1. Copy Manifest
         let manifest_path = source.join("manifest.json");
         fs::copy(&manifest_path, dest.join("manifest.json")).await?;
