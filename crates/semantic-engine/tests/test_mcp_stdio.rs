@@ -19,22 +19,17 @@ async fn test_mcp_integration() {
         jsonrpc: "2.0".into(),
         id: Some(json!(1)),
         method: "tools/call".into(),
-        params: Some(
-            json!({
-                "name": "ingest_triples",
-                "arguments": {
-                    "namespace": "default",
-                    "triples": [
-                        { "subject": "http://a", "predicate": "http://p", "object": "http://b" },
-                        { "subject": "http://b", "predicate": "http://p", "object": "http://c" },
-                        { "subject": "http://b", "predicate": "http://p", "object": "http://d" }
-                    ]
-                }
-            })
-            .as_object()
-            .unwrap()
-            .clone(),
-        ),
+        params: Some(json!({
+            "name": "ingest_triples",
+            "arguments": {
+                "namespace": "default",
+                "triples": [
+                    { "subject": "http://a", "predicate": "http://p", "object": "http://b" },
+                    { "subject": "http://b", "predicate": "http://p", "object": "http://c" },
+                    { "subject": "http://b", "predicate": "http://p", "object": "http://d" }
+                ]
+            }
+        })),
     };
 
     let resp_ingest = server.handle_request(req_ingest).await;
@@ -62,18 +57,13 @@ async fn test_mcp_integration() {
         jsonrpc: "2.0".into(),
         id: Some(json!(2)),
         method: "tools/call".into(),
-        params: Some(
-            json!({
-                "name": "get_node_degree",
-                "arguments": {
-                    "namespace": "default",
-                    "uri": "http://b"
-                }
-            })
-            .as_object()
-            .unwrap()
-            .clone(),
-        ),
+        params: Some(json!({
+            "name": "get_node_degree",
+            "arguments": {
+                "namespace": "default",
+                "uri": "http://b"
+            }
+        })),
     };
 
     let resp_degree = server.handle_request(req_degree).await;

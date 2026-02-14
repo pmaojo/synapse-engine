@@ -6,7 +6,7 @@ import sys
 import os
 
 def test_mcp():
-    synapse_path = os.path.join(os.path.dirname(__file__), 'bin/synapse')
+    synapse_path = os.path.join(os.path.dirname(__file__), 'target/debug/synapse')
     cmd = [synapse_path, '--mcp']
     print(f"Starting {cmd}...")
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
