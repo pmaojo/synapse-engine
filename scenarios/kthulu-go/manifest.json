@@ -1,0 +1,16 @@
+{
+  "name": "kthulu-go",
+  "version": "0.1.0",
+  "description": "Ontology and knowledge for mastering Kthulu Go (AI‑Native Software Foundry). Covers Modular Monoliths, Vertical Slices, BDD, and CLI commands.",
+  "ontologies": [
+    "kthulu.ttl"
+  ],
+  "data_files": [
+    "commands.ttl",
+    "modules.ttl"
+  ],
+  "docs": [
+    "guide.md",
+    "cli-reference.md"
+  ]
+}

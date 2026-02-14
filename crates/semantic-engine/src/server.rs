@@ -157,20 +157,13 @@ impl MySemanticEngine {
 
     #[allow(clippy::result_large_err)]
     pub fn get_store(&self, namespace: &str) -> Result<Arc<SynapseStore>, Status> {
-        if let Some(store) = self.stores.get(namespace) {
-            return Ok(store.clone());
-        }
-
-        let store = SynapseStore::open(namespace, &self.storage_path).map_err(|e| {
-            Status::internal(format!(
-                "Failed to open store for namespace '{}': {}",
-                namespace, e
-            ))
-        })?;
-
-        let store_arc = Arc::new(store);
-        self.stores.insert(namespace.to_string(), store_arc.clone());
-        Ok(store_arc)
+        // Use entry API to ensure atomicity
+        let store = self.stores.entry(namespace.to_string()).or_insert_with(|| {
+            let s = SynapseStore::open(namespace, &self.storage_path).expect("Failed to open store");
+            Arc::new(s)
+        });
+        
+        Ok(store.value().clone())
     }
 }
 

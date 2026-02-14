@@ -55,6 +55,7 @@ impl McpStdioServer {
             }
         }
 
+        self.engine.shutdown().await;
         Ok(())
     }
 

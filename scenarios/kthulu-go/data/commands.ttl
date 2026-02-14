@@ -1,0 +1,178 @@
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix kthulu: <http://synapse.os/kthulu#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+### Technologies
+kthulu:Go a kthulu:Technology ;
+  rdfs:label "Go" ;
+  kthulu:description "The Go programming language." .
+
+kthulu:Templ a kthulu:Technology ;
+  rdfs:label "Templ" ;
+  kthulu:description "HTML templating language for Go." .
+
+kthulu:HTMX a kthulu:Technology ;
+  rdfs:label "HTMX" ;
+  kthulu:description "HTMX for dynamic HTML." .
+
+kthulu:Godog a kthulu:Technology ;
+  rdfs:label "Godog" ;
+  kthulu:description "BDD framework for Go." .
+
+kthulu:Gherkin a kthulu:Technology ;
+  rdfs:label "Gherkin" ;
+  kthulu:description "Business‑readable domain‑specific language for BDD." .
+
+### Architecture Styles
+kthulu:VerticalSliceArchitecture a kthulu:ArchitectureStyle ;
+  rdfs:label "Vertical Slice Architecture" ;
+  kthulu:description "Organise code by feature (vertical slice) rather than technical layer." .
+
+kthulu:ModularMonolith a kthulu:ArchitectureStyle ;
+  rdfs:label "Modular Monolith" ;
+  kthulu:description "A monolithic application composed of loosely coupled modules." .
+
+### Commands
+kthulu:CommandCreate a kthulu:Command ;
+  rdfs:label "create" ;
+  kthulu:commandSyntax "kthulu create [name] --features=auth,user,billing" ;
+  kthulu:description "Scaffold a new production‑ready Modular Monolith." ;
+  kthulu:example "kthulu create myapp --features=auth,user" .
+
+kthulu:CommandAddModule a kthulu:Command ;
+  rdfs:label "add module" ;
+  kthulu:commandSyntax "kthulu add module [name] [fields...]" ;
+  kthulu:description "Add a new vertical slice to an existing project." ;
+  kthulu:example "kthulu add module products name:string price:float" .
+
+kthulu:CommandPlan a kthulu:Command ;
+  rdfs:label "plan" ;
+  kthulu:commandSyntax "kthulu plan [name] --template=ecommerce" ;
+  kthulu:description "Define the system blueprint in kthulu‑plan.yaml." ;
+  kthulu:example "kthulu plan mysystem --template=ecommerce" .
+
+kthulu:CommandBDDRun a kthulu:Command ;
+  rdfs:label "bdd run" ;
+  kthulu:commandSyntax "kthulu bdd run [filter]" ;
+  kthulu:description "Execute all scenarios or filter by name/regex." ;
+  kthulu:example "kthulu bdd run @smoke" .
+
+kthulu:CommandBDDList a kthulu:Command ;
+  rdfs:label "bdd list" ;
+  kthulu:commandSyntax "kthulu bdd list" ;
+  kthulu:description "Find all defined features in the project." ;
+  kthulu:example "kthulu bdd list" .
+
+kthulu:CommandAI a kthulu:Command ;
+  rdfs:label "ai" ;
+  kthulu:commandSyntax "kthulu ai gen‑feature \"description\" --apply" ;
+  kthulu:description "Use AI to generate a feature and its implementation." ;
+  kthulu:example "kthulu ai gen‑feature \"User login flow\" --apply" .
+
+kthulu:CommandAudit a kthulu:Command ;
+  rdfs:label "audit" ;
+  kthulu:commandSyntax "kthulu audit" ;
+  kthulu:description "Security check." ;
+  kthulu:example "kthulu audit" .
+
+kthulu:CommandCoder a kthulu:Command ;
+  rdfs:label "coder" ;
+  kthulu:commandSyntax "kthulu coder" ;
+  kthulu:description "Launch AI agent." ;
+  kthulu:example "kthulu coder" .
+
+kthulu:CommandAnalyzeOverview a kthulu:Command ;
+  rdfs:label "analyze overview" ;
+  kthulu:commandSyntax "kthulu analyze overview" ;
+  kthulu:description "Get a high‑level overview of the project architecture." ;
+  kthulu:example "kthulu analyze overview" .
+
+kthulu:CommandAnalyzeModules a kthulu:Command ;
+  rdfs:label "analyze modules" ;
+  kthulu:commandSyntax "kthulu analyze modules" ;
+  kthulu:description "List all vertical slices (modules) and their structure." ;
+  kthulu:example "kthulu analyze modules" .
+
+kthulu:CommandAnalyzeDeps a kthulu:Command ;
+  rdfs:label "analyze deps" ;
+  kthulu:commandSyntax "kthulu analyze deps" ;
+  kthulu:description "Visualize and audit internal/external dependencies between modules." ;
+  kthulu:example "kthulu analyze deps" .
+
+kthulu:CommandAuditSecurity a kthulu:Command ;
+  rdfs:label "audit security" ;
+  kthulu:commandSyntax "kthulu audit --security --compliance=gdpr" ;
+  kthulu:description "Run a security and compliance audit (SOX, GDPR, PCI)." ;
+  kthulu:example "kthulu audit --security --compliance=gdpr" .
+
+kthulu:CommandMigrateCreate a kthulu:Command ;
+  rdfs:label "migrate create" ;
+  kthulu:commandSyntax "kthulu migrate create [name]" ;
+  kthulu:description "Create a new database migration." ;
+  kthulu:example "kthulu migrate create add_users_table" .
+
+kthulu:CommandMigrateUp a kthulu:Command ;
+  rdfs:label "migrate up" ;
+  kthulu:commandSyntax "kthulu migrate up" ;
+  kthulu:description "Apply pending database migrations." ;
+  kthulu:example "kthulu migrate up" .
+
+kthulu:CommandMigrateStatus a kthulu:Command ;
+  rdfs:label "migrate status" ;
+  kthulu:commandSyntax "kthulu migrate status" ;
+  kthulu:description "Show status of database migrations." ;
+  kthulu:example "kthulu migrate status" .
+
+kthulu:CommandDev a kthulu:Command ;
+  rdfs:label "dev" ;
+  kthulu:commandSyntax "kthulu dev" ;
+  kthulu:description "Run the development server with hot‑reloading and AI self‑healing." ;
+  kthulu:example "kthulu dev" .
+
+### Parameters (example)
+kthulu:ParamName a kthulu:Parameter ;
+  rdfs:label "name" ;
+  kthulu:description "Project or module name." .
+
+kthulu:ParamFields a kthulu:Parameter ;
+  rdfs:label "fields" ;
+  kthulu:description "Field definitions in format field:type." .
+
+kthulu:ParamFeatures a kthulu:Parameter ;
+  rdfs:label "features" ;
+  kthulu:description "Comma‑separated list of features to include." .
+
+kthulu:ParamFilter a kthulu:Parameter ;
+  rdfs:label "filter" ;
+  kthulu:description "Regex filter for scenarios." .
+
+kthulu:ParamTemplate a kthulu:Parameter ;
+  rdfs:label "template" ;
+  kthulu:description "Blueprint template name." .
+
+kthulu:ParamSecurity a kthulu:Parameter ;
+  rdfs:label "security" ;
+  kthulu:description "Enable security audit." .
+
+kthulu:ParamCompliance a kthulu:Parameter ;
+  rdfs:label "compliance" ;
+  kthulu:description "Compliance standard (gdpr, sox, pci)." .
+
+### Link commands to parameters
+kthulu:CommandCreate kthulu:requiresParameter kthulu:ParamName .
+kthulu:CommandCreate kthulu:requiresParameter kthulu:ParamFeatures .
+
+kthulu:CommandAddModule kthulu:requiresParameter kthulu:ParamName .
+kthulu:CommandAddModule kthulu:requiresParameter kthulu:ParamFields .
+
+kthulu:CommandPlan kthulu:requiresParameter kthulu:ParamName .
+kthulu:CommandPlan kthulu:requiresParameter kthulu:ParamTemplate .
+
+kthulu:CommandBDDRun kthulu:requiresParameter kthulu:ParamFilter .
+
+kthulu:CommandAuditSecurity kthulu:requiresParameter kthulu:ParamSecurity .
+kthulu:CommandAuditSecurity kthulu:requiresParameter kthulu:ParamCompliance .
+
+kthulu:CommandMigrateCreate kthulu:requiresParameter kthulu:ParamName .

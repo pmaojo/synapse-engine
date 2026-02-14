@@ -1,0 +1,73 @@
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix kthulu: <http://synapse.os/kthulu#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+
+### Example Project
+kthulu:ExampleProject a kthulu:Project ;
+  rdfs:label "Example E‑commerce Project" ;
+  kthulu:description "A sample Kthulu project for an online store." ;
+  kthulu:followsArchitectureStyle kthulu:VerticalSliceArchitecture ;
+  kthulu:followsArchitectureStyle kthulu:ModularMonolith ;
+  kthulu:usesTechnology kthulu:Go ;
+  kthulu:usesTechnology kthulu:Templ ;
+  kthulu:usesTechnology kthulu:HTMX ;
+  kthulu:usesTechnology kthulu:Godog ;
+  kthulu:usesTechnology kthulu:Gherkin .
+
+### Example Modules
+kthulu:ModuleProducts a kthulu:Module ;
+  rdfs:label "products" ;
+  kthulu:description "Product catalog module." ;
+  kthulu:hasFeature kthulu:FeatureProductCatalog .
+
+kthulu:ModuleUsers a kthulu:Module ;
+  rdfs:label "users" ;
+  kthulu:description "User authentication and management module." ;
+  kthulu:hasFeature kthulu:FeatureUserLogin .
+
+kthulu:ModuleOrders a kthulu:Module ;
+  rdfs:label "orders" ;
+  kthulu:description "Order processing module." ;
+  kthulu:hasFeature kthulu:FeaturePlaceOrder .
+
+### Example Features
+kthulu:FeatureProductCatalog a kthulu:Feature ;
+  rdfs:label "Product Catalog" ;
+  kthulu:description "Manage product listings and details." ;
+  kthulu:hasScenario kthulu:ScenarioViewProduct .
+
+kthulu:FeatureUserLogin a kthulu:Feature ;
+  rdfs:label "User Login" ;
+  kthulu:description "User authentication flow." ;
+  kthulu:hasScenario kthulu:ScenarioLoginSuccess .
+
+kthulu:FeaturePlaceOrder a kthulu:Feature ;
+  rdfs:label "Place Order" ;
+  kthulu:description "Checkout and order placement." ;
+  kthulu:hasScenario kthulu:ScenarioCheckout .
+
+### Example Scenarios
+kthulu:ScenarioViewProduct a kthulu:Scenario ;
+  rdfs:label "View product details" ;
+  kthulu:description "As a customer, I can view product details." .
+
+kthulu:ScenarioLoginSuccess a kthulu:Scenario ;
+  rdfs:label "Login successful" ;
+  kthulu:description "Given a registered user, when they login with correct credentials, then they access the dashboard." .
+
+kthulu:ScenarioCheckout a kthulu:Scenario ;
+  rdfs:label "Checkout with items" ;
+  kthulu:description "Given items in cart, when user checks out, then order is created and payment processed." .
+
+### Link project to modules
+kthulu:ExampleProject kthulu:hasModule kthulu:ModuleProducts .
+kthulu:ExampleProject kthulu:hasModule kthulu:ModuleUsers .
+kthulu:ExampleProject kthulu:hasModule kthulu:ModuleOrders .
+
+### Link project to commands (available CLI commands)
+kthulu:ExampleProject kthulu:hasCommand kthulu:CommandCreate .
+kthulu:ExampleProject kthulu:hasCommand kthulu:CommandAddModule .
+kthulu:ExampleProject kthulu:hasCommand kthulu:CommandBDDRun .
+kthulu:ExampleProject kthulu:hasCommand kthulu:CommandAnalyzeOverview .

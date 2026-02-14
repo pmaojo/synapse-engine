@@ -10,5 +10,11 @@
     "description": "Academic research assistant scenario.",
     "version": "1.0.0",
     "location": "https://raw.githubusercontent.com/pmaojo/synapse-engine/main/scenarios/research-assistant"
+  },
+  {
+    "name": "kthulu-go",
+    "description": "Kthulu Go AI-Native Software Foundry mastering.",
+    "version": "1.0.0",
+    "location": "./scenarios/kthulu-go"
   }
 ]

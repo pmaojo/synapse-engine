@@ -1,0 +1,121 @@
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix kthulu: <http://synapse.os/kthulu#> .
+@prefix core: <http://sys.semantic/core#> .
+
+<http://synapse.os/kthulu>
+  a owl:Ontology ;
+  rdfs:label "Kthulu Go Ontology" ;
+  rdfs:comment "Concepts and relationships for the Kthulu Go AI‑Native Software Foundry." ;
+  owl:imports <http://sys.semantic/core> .
+
+### Classes
+kthulu:Project a owl:Class ;
+  rdfs:label "Kthulu Project" ;
+  rdfs:comment "A Modular Monolith project created with Kthulu." ;
+  rdfs:subClassOf core:Entity .
+
+kthulu:Module a owl:Class ;
+  rdfs:label "Kthulu Module" ;
+  rdfs:comment "A vertical slice (feature module) within a Kthulu project." ;
+  rdfs:subClassOf core:Entity .
+
+kthulu:Feature a owl:Class ;
+  rdfs:label "BDD Feature" ;
+  rdfs:comment "A Gherkin feature file describing behavior." ;
+  rdfs:subClassOf core:Entity .
+
+kthulu:Scenario a owl:Class ;
+  rdfs:label "BDD Scenario" ;
+  rdfs:comment "A concrete scenario within a feature." ;
+  rdfs:subClassOf core:Entity .
+
+kthulu:Command a owl:Class ;
+  rdfs:label "Kthulu CLI Command" ;
+  rdfs:comment "A command available in the Kthulu CLI." ;
+  rdfs:subClassOf core:Process .
+
+kthulu:Parameter a owl:Class ;
+  rdfs:label "Command Parameter" ;
+  rdfs:comment "A positional or named parameter of a CLI command." ;
+  rdfs:subClassOf core:Entity .
+
+kthulu:Technology a owl:Class ;
+  rdfs:label "Technology" ;
+  rdfs:comment "A technology used in the Kthulu stack (Go, Templ, HTMX, Godog, etc.)." ;
+  rdfs:subClassOf core:Entity .
+
+kthulu:ArchitectureStyle a owl:Class ;
+  rdfs:label "Architecture Style" ;
+  rdfs:comment "An architectural pattern (Vertical Slice, Modular Monolith, etc.)." ;
+  rdfs:subClassOf core:Entity .
+
+### Object Properties
+kthulu:hasModule a owl:ObjectProperty ;
+  rdfs:label "has module" ;
+  rdfs:comment "Links a project to its modules." ;
+  rdfs:domain kthulu:Project ;
+  rdfs:range kthulu:Module .
+
+kthulu:hasFeature a owl:ObjectProperty ;
+  rdfs:label "has feature" ;
+  rdfs:comment "Links a module to its BDD features." ;
+  rdfs:domain kthulu:Module ;
+  rdfs:range kthulu:Feature .
+
+kthulu:hasScenario a owl:ObjectProperty ;
+  rdfs:label "has scenario" ;
+  rdfs:comment "Links a feature to its scenarios." ;
+  rdfs:domain kthulu:Feature ;
+  rdfs:range kthulu:Scenario .
+
+kthulu:hasCommand a owl:ObjectProperty ;
+  rdfs:label "has command" ;
+  rdfs:comment "Links a project to available CLI commands." ;
+  rdfs:domain kthulu:Project ;
+  rdfs:range kthulu:Command .
+
+kthulu:hasParameter a owl:ObjectProperty ;
+  rdfs:label "has parameter" ;
+  rdfs:comment "Links a command to its parameters." ;
+  rdfs:domain kthulu:Command ;
+  rdfs:range kthulu:Parameter .
+
+kthulu:usesTechnology a owl:ObjectProperty ;
+  rdfs:label "uses technology" ;
+  rdfs:comment "Links a project to technologies it employs." ;
+  rdfs:domain kthulu:Project ;
+  rdfs:range kthulu:Technology .
+
+kthulu:followsArchitectureStyle a owl:ObjectProperty ;
+  rdfs:label "follows architecture style" ;
+  rdfs:comment "Links a project to its architectural style." ;
+  rdfs:domain kthulu:Project ;
+  rdfs:range kthulu:ArchitectureStyle .
+
+kthulu:requiresParameter a owl:ObjectProperty ;
+  rdfs:label "requires parameter" ;
+  rdfs:comment "Indicates that a parameter is required for a command." ;
+  rdfs:domain kthulu:Command ;
+  rdfs:range kthulu:Parameter .
+
+### Data Properties
+kthulu:commandSyntax a owl:DatatypeProperty ;
+  rdfs:label "command syntax" ;
+  rdfs:comment "The CLI syntax of a command (e.g., 'kthulu create [name]')." ;
+  rdfs:domain kthulu:Command ;
+  rdfs:range xsd:string .
+
+kthulu:description a owl:DatatypeProperty ;
+  rdfs:label "description" ;
+  rdfs:comment "A human‑readable description." ;
+  rdfs:domain core:Entity ;
+  rdfs:range xsd:string .
+
+kthulu:example a owl:DatatypeProperty ;
+  rdfs:label "example" ;
+  rdfs:comment "An example usage string." ;
+  rdfs:domain kthulu:Command ;
+  rdfs:range xsd:string .
