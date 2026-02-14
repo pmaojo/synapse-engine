@@ -1,0 +1,745 @@
+Source and destination are the same, skipping copy.
+Loading ontology: "core.owl"
+  Failed to load ontology "./scenarios/core/schema/core.owl": Vector store insertion failed, rolled back graph change: HuggingFace API error: <!DOCTYPE html>
+<html class="" lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta
+            name="viewport"
+            content="width=device-width, initial-scale=1.0, user-scalable=no"
+    />
+    <meta
+            name="description"
+            content="We're on a journey to advance and democratize artificial intelligence through open source and open science."
+    />
+    <meta property="fb:app_id" content="1321688464574422" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:site" content="@huggingface" />
+    <meta
+            property="og:title"
+            content="Hugging Face - The AI community building the future."
+    />
+    <meta property="og:type" content="website" />
+
+    <title>Hugging Face - The AI community building the future.</title>
+    <style>
+        body {
+            margin: 0;
+        }
+
+        main {
+            background-color: white;
+            min-height: 100vh;
+            padding: 7rem 1rem 8rem 1rem;
+            text-align: center;
+            font-family: Source Sans Pro, ui-sans-serif, system-ui, -apple-system,
+            BlinkMacSystemFont, Segoe UI, Roboto, Helvetica Neue, Arial, Noto Sans,
+            sans-serif, Apple Color Emoji, Segoe UI Emoji, Segoe UI Symbol,
+            Noto Color Emoji;
+        }
+
+        img {
+            width: 6rem;
+            height: 6rem;
+            margin: 0 auto 1rem;
+        }
+
+        h1 {
+            font-size: 3.75rem;
+            line-height: 1;
+            color: rgba(31, 41, 55, 1);
+            font-weight: 700;
+            box-sizing: border-box;
+            margin: 0 auto;
+        }
+
+        p, a {
+            color: rgba(107, 114, 128, 1);
+            font-size: 1.125rem;
+            line-height: 1.75rem;
+            max-width: 28rem;
+            box-sizing: border-box;
+            margin: 0 auto;
+        }
+
+        .dark main {
+            background-color: rgb(11, 15, 25);
+        }
+        .dark h1 {
+            color: rgb(209, 213, 219);
+        }
+        .dark p, .dark a {
+            color: rgb(156, 163, 175);
+        }
+    </style>
+    <script>
+        // On page load or when changing themes, best to add inline in `head` to avoid FOUC
+        const key = "_tb_global_settings";
+        let theme = window.matchMedia("(prefers-color-scheme: dark)").matches
+            ? "dark"
+            : "light";
+        try {
+            const storageTheme = JSON.parse(window.localStorage.getItem(key)).theme;
+            if (storageTheme) {
+                theme = storageTheme === "dark" ? "dark" : "light";
+            }
+        } catch (e) {}
+        if (theme === "dark") {
+            document.documentElement.classList.add("dark");
+        } else {
+            document.documentElement.classList.remove("dark");
+        }
+    </script>
+</head>
+
+<body>
+<main>
+    <img
+            src="https://cdn-media.huggingface.co/assets/huggingface_logo.svg"
+            alt=""
+    />
+    <div>
+        <h1>401</h1>
+        <p>Unauthorized access. Please check your credentials or authorization</p>
+    </div>
+</main>
+</body>
+</html>
+Loading ontology: "prov.owl"
+  Failed to load ontology "./scenarios/core/schema/prov.owl": Vector store insertion failed, rolled back graph change: HuggingFace API error: <!DOCTYPE html>
+<html class="" lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta
+            name="viewport"
+            content="width=device-width, initial-scale=1.0, user-scalable=no"
+    />
+    <meta
+            name="description"
+            content="We're on a journey to advance and democratize artificial intelligence through open source and open science."
+    />
+    <meta property="fb:app_id" content="1321688464574422" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:site" content="@huggingface" />
+    <meta
+            property="og:title"
+            content="Hugging Face - The AI community building the future."
+    />
+    <meta property="og:type" content="website" />
+
+    <title>Hugging Face - The AI community building the future.</title>
+    <style>
+        body {
+            margin: 0;
+        }
+
+        main {
+            background-color: white;
+            min-height: 100vh;
+            padding: 7rem 1rem 8rem 1rem;
+            text-align: center;
+            font-family: Source Sans Pro, ui-sans-serif, system-ui, -apple-system,
+            BlinkMacSystemFont, Segoe UI, Roboto, Helvetica Neue, Arial, Noto Sans,
+            sans-serif, Apple Color Emoji, Segoe UI Emoji, Segoe UI Symbol,
+            Noto Color Emoji;
+        }
+
+        img {
+            width: 6rem;
+            height: 6rem;
+            margin: 0 auto 1rem;
+        }
+
+        h1 {
+            font-size: 3.75rem;
+            line-height: 1;
+            color: rgba(31, 41, 55, 1);
+            font-weight: 700;
+            box-sizing: border-box;
+            margin: 0 auto;
+        }
+
+        p, a {
+            color: rgba(107, 114, 128, 1);
+            font-size: 1.125rem;
+            line-height: 1.75rem;
+            max-width: 28rem;
+            box-sizing: border-box;
+            margin: 0 auto;
+        }
+
+        .dark main {
+            background-color: rgb(11, 15, 25);
+        }
+        .dark h1 {
+            color: rgb(209, 213, 219);
+        }
+        .dark p, .dark a {
+            color: rgb(156, 163, 175);
+        }
+    </style>
+    <script>
+        // On page load or when changing themes, best to add inline in `head` to avoid FOUC
+        const key = "_tb_global_settings";
+        let theme = window.matchMedia("(prefers-color-scheme: dark)").matches
+            ? "dark"
+            : "light";
+        try {
+            const storageTheme = JSON.parse(window.localStorage.getItem(key)).theme;
+            if (storageTheme) {
+                theme = storageTheme === "dark" ? "dark" : "light";
+            }
+        } catch (e) {}
+        if (theme === "dark") {
+            document.documentElement.classList.add("dark");
+        } else {
+            document.documentElement.classList.remove("dark");
+        }
+    </script>
+</head>
+
+<body>
+<main>
+    <img
+            src="https://cdn-media.huggingface.co/assets/huggingface_logo.svg"
+            alt=""
+    />
+    <div>
+        <h1>401</h1>
+        <p>Unauthorized access. Please check your credentials or authorization</p>
+    </div>
+</main>
+</body>
+</html>
+Loading ontology: "schema.owl"
+  Failed to load ontology "./scenarios/core/schema/schema.owl": Vector store insertion failed, rolled back graph change: HuggingFace API error: <!DOCTYPE html>
+<html class="" lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta
+            name="viewport"
+            content="width=device-width, initial-scale=1.0, user-scalable=no"
+    />
+    <meta
+            name="description"
+            content="We're on a journey to advance and democratize artificial intelligence through open source and open science."
+    />
+    <meta property="fb:app_id" content="1321688464574422" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:site" content="@huggingface" />
+    <meta
+            property="og:title"
+            content="Hugging Face - The AI community building the future."
+    />
+    <meta property="og:type" content="website" />
+
+    <title>Hugging Face - The AI community building the future.</title>
+    <style>
+        body {
+            margin: 0;
+        }
+
+        main {
+            background-color: white;
+            min-height: 100vh;
+            padding: 7rem 1rem 8rem 1rem;
+            text-align: center;
+            font-family: Source Sans Pro, ui-sans-serif, system-ui, -apple-system,
+            BlinkMacSystemFont, Segoe UI, Roboto, Helvetica Neue, Arial, Noto Sans,
+            sans-serif, Apple Color Emoji, Segoe UI Emoji, Segoe UI Symbol,
+            Noto Color Emoji;
+        }
+
+        img {
+            width: 6rem;
+            height: 6rem;
+            margin: 0 auto 1rem;
+        }
+
+        h1 {
+            font-size: 3.75rem;
+            line-height: 1;
+            color: rgba(31, 41, 55, 1);
+            font-weight: 700;
+            box-sizing: border-box;
+            margin: 0 auto;
+        }
+
+        p, a {
+            color: rgba(107, 114, 128, 1);
+            font-size: 1.125rem;
+            line-height: 1.75rem;
+            max-width: 28rem;
+            box-sizing: border-box;
+            margin: 0 auto;
+        }
+
+        .dark main {
+            background-color: rgb(11, 15, 25);
+        }
+        .dark h1 {
+            color: rgb(209, 213, 219);
+        }
+        .dark p, .dark a {
+            color: rgb(156, 163, 175);
+        }
+    </style>
+    <script>
+        // On page load or when changing themes, best to add inline in `head` to avoid FOUC
+        const key = "_tb_global_settings";
+        let theme = window.matchMedia("(prefers-color-scheme: dark)").matches
+            ? "dark"
+            : "light";
+        try {
+            const storageTheme = JSON.parse(window.localStorage.getItem(key)).theme;
+            if (storageTheme) {
+                theme = storageTheme === "dark" ? "dark" : "light";
+            }
+        } catch (e) {}
+        if (theme === "dark") {
+            document.documentElement.classList.add("dark");
+        } else {
+            document.documentElement.classList.remove("dark");
+        }
+    </script>
+</head>
+
+<body>
+<main>
+    <img
+            src="https://cdn-media.huggingface.co/assets/huggingface_logo.svg"
+            alt=""
+    />
+    <div>
+        <h1>401</h1>
+        <p>Unauthorized access. Please check your credentials or authorization</p>
+    </div>
+</main>
+</body>
+</html>
+Loading ontology: "memory.owl"
+  Failed to load ontology "./scenarios/core/schema/memory.owl": Vector store insertion failed, rolled back graph change: HuggingFace API error: <!DOCTYPE html>
+<html class="" lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta
+            name="viewport"
+            content="width=device-width, initial-scale=1.0, user-scalable=no"
+    />
+    <meta
+            name="description"
+            content="We're on a journey to advance and democratize artificial intelligence through open source and open science."
+    />
+    <meta property="fb:app_id" content="1321688464574422" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:site" content="@huggingface" />
+    <meta
+            property="og:title"
+            content="Hugging Face - The AI community building the future."
+    />
+    <meta property="og:type" content="website" />
+
+    <title>Hugging Face - The AI community building the future.</title>
+    <style>
+        body {
+            margin: 0;
+        }
+
+        main {
+            background-color: white;
+            min-height: 100vh;
+            padding: 7rem 1rem 8rem 1rem;
+            text-align: center;
+            font-family: Source Sans Pro, ui-sans-serif, system-ui, -apple-system,
+            BlinkMacSystemFont, Segoe UI, Roboto, Helvetica Neue, Arial, Noto Sans,
+            sans-serif, Apple Color Emoji, Segoe UI Emoji, Segoe UI Symbol,
+            Noto Color Emoji;
+        }
+
+        img {
+            width: 6rem;
+            height: 6rem;
+            margin: 0 auto 1rem;
+        }
+
+        h1 {
+            font-size: 3.75rem;
+            line-height: 1;
+            color: rgba(31, 41, 55, 1);
+            font-weight: 700;
+            box-sizing: border-box;
+            margin: 0 auto;
+        }
+
+        p, a {
+            color: rgba(107, 114, 128, 1);
+            font-size: 1.125rem;
+            line-height: 1.75rem;
+            max-width: 28rem;
+            box-sizing: border-box;
+            margin: 0 auto;
+        }
+
+        .dark main {
+            background-color: rgb(11, 15, 25);
+        }
+        .dark h1 {
+            color: rgb(209, 213, 219);
+        }
+        .dark p, .dark a {
+            color: rgb(156, 163, 175);
+        }
+    </style>
+    <script>
+        // On page load or when changing themes, best to add inline in `head` to avoid FOUC
+        const key = "_tb_global_settings";
+        let theme = window.matchMedia("(prefers-color-scheme: dark)").matches
+            ? "dark"
+            : "light";
+        try {
+            const storageTheme = JSON.parse(window.localStorage.getItem(key)).theme;
+            if (storageTheme) {
+                theme = storageTheme === "dark" ? "dark" : "light";
+            }
+        } catch (e) {}
+        if (theme === "dark") {
+            document.documentElement.classList.add("dark");
+        } else {
+            document.documentElement.classList.remove("dark");
+        }
+    </script>
+</head>
+
+<body>
+<main>
+    <img
+            src="https://cdn-media.huggingface.co/assets/huggingface_logo.svg"
+            alt=""
+    />
+    <div>
+        <h1>401</h1>
+        <p>Unauthorized access. Please check your credentials or authorization</p>
+    </div>
+</main>
+</body>
+</html>
+Loading ontology: "frontend.owl"
+  Failed to load ontology "./scenarios/core/schema/frontend.owl": Vector store insertion failed, rolled back graph change: HuggingFace API error: <!DOCTYPE html>
+<html class="" lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta
+            name="viewport"
+            content="width=device-width, initial-scale=1.0, user-scalable=no"
+    />
+    <meta
+            name="description"
+            content="We're on a journey to advance and democratize artificial intelligence through open source and open science."
+    />
+    <meta property="fb:app_id" content="1321688464574422" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:site" content="@huggingface" />
+    <meta
+            property="og:title"
+            content="Hugging Face - The AI community building the future."
+    />
+    <meta property="og:type" content="website" />
+
+    <title>Hugging Face - The AI community building the future.</title>
+    <style>
+        body {
+            margin: 0;
+        }
+
+        main {
+            background-color: white;
+            min-height: 100vh;
+            padding: 7rem 1rem 8rem 1rem;
+            text-align: center;
+            font-family: Source Sans Pro, ui-sans-serif, system-ui, -apple-system,
+            BlinkMacSystemFont, Segoe UI, Roboto, Helvetica Neue, Arial, Noto Sans,
+            sans-serif, Apple Color Emoji, Segoe UI Emoji, Segoe UI Symbol,
+            Noto Color Emoji;
+        }
+
+        img {
+            width: 6rem;
+            height: 6rem;
+            margin: 0 auto 1rem;
+        }
+
+        h1 {
+            font-size: 3.75rem;
+            line-height: 1;
+            color: rgba(31, 41, 55, 1);
+            font-weight: 700;
+            box-sizing: border-box;
+            margin: 0 auto;
+        }
+
+        p, a {
+            color: rgba(107, 114, 128, 1);
+            font-size: 1.125rem;
+            line-height: 1.75rem;
+            max-width: 28rem;
+            box-sizing: border-box;
+            margin: 0 auto;
+        }
+
+        .dark main {
+            background-color: rgb(11, 15, 25);
+        }
+        .dark h1 {
+            color: rgb(209, 213, 219);
+        }
+        .dark p, .dark a {
+            color: rgb(156, 163, 175);
+        }
+    </style>
+    <script>
+        // On page load or when changing themes, best to add inline in `head` to avoid FOUC
+        const key = "_tb_global_settings";
+        let theme = window.matchMedia("(prefers-color-scheme: dark)").matches
+            ? "dark"
+            : "light";
+        try {
+            const storageTheme = JSON.parse(window.localStorage.getItem(key)).theme;
+            if (storageTheme) {
+                theme = storageTheme === "dark" ? "dark" : "light";
+            }
+        } catch (e) {}
+        if (theme === "dark") {
+            document.documentElement.classList.add("dark");
+        } else {
+            document.documentElement.classList.remove("dark");
+        }
+    </script>
+</head>
+
+<body>
+<main>
+    <img
+            src="https://cdn-media.huggingface.co/assets/huggingface_logo.svg"
+            alt=""
+    />
+    <div>
+        <h1>401</h1>
+        <p>Unauthorized access. Please check your credentials or authorization</p>
+    </div>
+</main>
+</body>
+</html>
+Loading ontology: "skos.owl"
+  Failed to load ontology "./scenarios/core/schema/skos.owl": Vector store insertion failed, rolled back graph change: HuggingFace API error: <!DOCTYPE html>
+<html class="" lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta
+            name="viewport"
+            content="width=device-width, initial-scale=1.0, user-scalable=no"
+    />
+    <meta
+            name="description"
+            content="We're on a journey to advance and democratize artificial intelligence through open source and open science."
+    />
+    <meta property="fb:app_id" content="1321688464574422" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:site" content="@huggingface" />
+    <meta
+            property="og:title"
+            content="Hugging Face - The AI community building the future."
+    />
+    <meta property="og:type" content="website" />
+
+    <title>Hugging Face - The AI community building the future.</title>
+    <style>
+        body {
+            margin: 0;
+        }
+
+        main {
+            background-color: white;
+            min-height: 100vh;
+            padding: 7rem 1rem 8rem 1rem;
+            text-align: center;
+            font-family: Source Sans Pro, ui-sans-serif, system-ui, -apple-system,
+            BlinkMacSystemFont, Segoe UI, Roboto, Helvetica Neue, Arial, Noto Sans,
+            sans-serif, Apple Color Emoji, Segoe UI Emoji, Segoe UI Symbol,
+            Noto Color Emoji;
+        }
+
+        img {
+            width: 6rem;
+            height: 6rem;
+            margin: 0 auto 1rem;
+        }
+
+        h1 {
+            font-size: 3.75rem;
+            line-height: 1;
+            color: rgba(31, 41, 55, 1);
+            font-weight: 700;
+            box-sizing: border-box;
+            margin: 0 auto;
+        }
+
+        p, a {
+            color: rgba(107, 114, 128, 1);
+            font-size: 1.125rem;
+            line-height: 1.75rem;
+            max-width: 28rem;
+            box-sizing: border-box;
+            margin: 0 auto;
+        }
+
+        .dark main {
+            background-color: rgb(11, 15, 25);
+        }
+        .dark h1 {
+            color: rgb(209, 213, 219);
+        }
+        .dark p, .dark a {
+            color: rgb(156, 163, 175);
+        }
+    </style>
+    <script>
+        // On page load or when changing themes, best to add inline in `head` to avoid FOUC
+        const key = "_tb_global_settings";
+        let theme = window.matchMedia("(prefers-color-scheme: dark)").matches
+            ? "dark"
+            : "light";
+        try {
+            const storageTheme = JSON.parse(window.localStorage.getItem(key)).theme;
+            if (storageTheme) {
+                theme = storageTheme === "dark" ? "dark" : "light";
+            }
+        } catch (e) {}
+        if (theme === "dark") {
+            document.documentElement.classList.add("dark");
+        } else {
+            document.documentElement.classList.remove("dark");
+        }
+    </script>
+</head>
+
+<body>
+<main>
+    <img
+            src="https://cdn-media.huggingface.co/assets/huggingface_logo.svg"
+            alt=""
+    />
+    <div>
+        <h1>401</h1>
+        <p>Unauthorized access. Please check your credentials or authorization</p>
+    </div>
+</main>
+</body>
+</html>
+Loading ontology: "foaf.owl"
+  Failed to load ontology "./scenarios/core/schema/foaf.owl": Vector store insertion failed, rolled back graph change: HuggingFace API error: <!DOCTYPE html>
+<html class="" lang="en">
+<head>
+    <meta charset="utf-8" />
+    <meta
+            name="viewport"
+            content="width=device-width, initial-scale=1.0, user-scalable=no"
+    />
+    <meta
+            name="description"
+            content="We're on a journey to advance and democratize artificial intelligence through open source and open science."
+    />
+    <meta property="fb:app_id" content="1321688464574422" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:site" content="@huggingface" />
+    <meta
+            property="og:title"
+            content="Hugging Face - The AI community building the future."
+    />
+    <meta property="og:type" content="website" />
+
+    <title>Hugging Face - The AI community building the future.</title>
+    <style>
+        body {
+            margin: 0;
+        }
+
+        main {
+            background-color: white;
+            min-height: 100vh;
+            padding: 7rem 1rem 8rem 1rem;
+            text-align: center;
+            font-family: Source Sans Pro, ui-sans-serif, system-ui, -apple-system,
+            BlinkMacSystemFont, Segoe UI, Roboto, Helvetica Neue, Arial, Noto Sans,
+            sans-serif, Apple Color Emoji, Segoe UI Emoji, Segoe UI Symbol,
+            Noto Color Emoji;
+        }
+
+        img {
+            width: 6rem;
+            height: 6rem;
+            margin: 0 auto 1rem;
+        }
+
+        h1 {
+            font-size: 3.75rem;
+            line-height: 1;
+            color: rgba(31, 41, 55, 1);
+            font-weight: 700;
+            box-sizing: border-box;
+            margin: 0 auto;
+        }
+
+        p, a {
+            color: rgba(107, 114, 128, 1);
+            font-size: 1.125rem;
+            line-height: 1.75rem;
+            max-width: 28rem;
+            box-sizing: border-box;
+            margin: 0 auto;
+        }
+
+        .dark main {
+            background-color: rgb(11, 15, 25);
+        }
+        .dark h1 {
+            color: rgb(209, 213, 219);
+        }
+        .dark p, .dark a {
+            color: rgb(156, 163, 175);
+        }
+    </style>
+    <script>
+        // On page load or when changing themes, best to add inline in `head` to avoid FOUC
+        const key = "_tb_global_settings";
+        let theme = window.matchMedia("(prefers-color-scheme: dark)").matches
+            ? "dark"
+            : "light";
+        try {
+            const storageTheme = JSON.parse(window.localStorage.getItem(key)).theme;
+            if (storageTheme) {
+                theme = storageTheme === "dark" ? "dark" : "light";
+            }
+        } catch (e) {}
+        if (theme === "dark") {
+            document.documentElement.classList.add("dark");
+        } else {
+            document.documentElement.classList.remove("dark");
+        }
+    </script>
+</head>
+
+<body>
+<main>
+    <img
+            src="https://cdn-media.huggingface.co/assets/huggingface_logo.svg"
+            alt=""
+    />
+    <div>
+        <h1>401</h1>
+        <p>Unauthorized access. Please check your credentials or authorization</p>
+    </div>
+</main>
+</body>
+</html>
+Scenario 'core' installed. Loaded 0 triples (0 data files) and 1 docs.
+Synapse-MCP starting (stdio mode)...

@@ -1,0 +1,1 @@
+{"jsonrpc":"2.0","id":1,"result":{"content":[{"text":"{\n  \"nodes_added\": 1,\n  \"edges_added\": 1,\n  \"message\": \"Ingested 1 triples\"\n}","type":"text"}],"isError":null}}

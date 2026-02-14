@@ -1,0 +1,18 @@
+Source and destination are the same, skipping copy.
+Loading ontology: "core.owl"
+  Loaded 26 triples
+Loading ontology: "prov.owl"
+  Loaded 52 triples
+Loading ontology: "schema.owl"
+  Loaded 53 triples
+Loading ontology: "memory.owl"
+  Loaded 30 triples
+Loading ontology: "frontend.owl"
+  Loaded 19 triples
+Loading ontology: "skos.owl"
+  Loaded 36 triples
+Loading ontology: "foaf.owl"
+  Loaded 64 triples
+Scenario 'core' installed. Loaded 280 triples (0 data files) and 1 docs.
+Synapse-MCP starting (stdio mode)...
+INGEST [2026-02-13T18:32:58.975230003+00:00] namespace=default triples=1 added=1 sources=["mcp"]

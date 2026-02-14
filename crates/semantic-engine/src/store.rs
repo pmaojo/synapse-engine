@@ -376,6 +376,7 @@ impl SynapseStore {
     }
 
     pub fn ensure_uri(&self, s: &str) -> String {
+        let s = s.trim_matches('<').trim_matches('>');
         if s.starts_with("http") || s.starts_with("urn:") {
             s.to_string()
         } else {
