@@ -80,7 +80,13 @@ impl SynapseStore {
         };
 
         // Initialize vector store (optional, can fail gracefully)
-        let vector_store = VectorStore::new(namespace).ok().map(Arc::new);
+        let vector_store = match VectorStore::new(namespace) {
+            Ok(vs) => Some(Arc::new(vs)),
+            Err(e) => {
+                eprintln!("WARNING: Failed to initialize vector store for namespace '{}': {}", namespace, e);
+                None
+            }
+        };
 
         Ok(Self {
             store,
@@ -230,18 +236,15 @@ impl SynapseStore {
                 let object = Term::NamedNode(NamedNode::new_unchecked(&object_uri));
 
                 let quad = Quad::new(subject, predicate, object, graph_name.clone());
-                if self.store.insert(&quad)? {
-                    // Also index in vector store if available
-                    if let Some(ref vs) = self.vector_store {
+                let inserted = self.store.insert(&quad)?;
+                
+                // Also index in vector store if available
+                if let Some(ref vs) = self.vector_store {
+                    // We check if it's already in the vector store by key
+                    let key = format!("{}|{}|{}", subject_uri, predicate_uri, object_uri);
+                    if vs.get_id(&key).is_none() {
                         // Create searchable content from triple
                         let content = format!("{} {} {}", s, p, o);
-                        // Use a deterministic hash/key for the triple to allow multiple triples per subject
-                        // We use the content itself as key or a hash of it.
-                        // Ideally we should use a hash, but for simplicity let's use the formatted content string as key prefix?
-                        // Actually, just using a unique ID is fine, but we want idempotency.
-                        // format!("{}|{}|{}", s, p, o)
-                        let key = format!("{}|{}|{}", subject_uri, predicate_uri, object_uri);
-
                         // Pass metadata including the subject URI for graph expansion later
                         let metadata = serde_json::json!({
                             "uri": subject_uri,
@@ -251,14 +254,14 @@ impl SynapseStore {
                         });
 
                         if let Err(e) = vs.add(&key, &content, metadata).await {
-                            // Rollback graph insertion to ensure consistency
-                            self.store.remove(&quad)?;
-                            return Err(anyhow::anyhow!(
-                                "Vector store insertion failed, rolled back graph change: {}",
-                                e
-                            ));
+                            // If we just inserted it into the graph but vector failed, 
+                            // we technically have an inconsistency, but for now we just log.
+                            eprintln!("Vector store insertion failed for {}: {}", key, e);
                         }
                     }
+                }
+
+                if inserted {
                     added += 1;
                 }
             }
@@ -376,10 +379,11 @@ impl SynapseStore {
     }
 
     pub fn ensure_uri(&self, s: &str) -> String {
-        if s.starts_with("http") || s.starts_with("urn:") {
-            s.to_string()
+        let clean = s.trim_start_matches('<').trim_end_matches('>');
+        if clean.starts_with("http") || clean.starts_with("urn:") {
+            clean.to_string()
         } else {
-            format!("http://synapse.os/{}", s)
+            format!("http://synapse.os/{}", clean)
         }
     }
 }

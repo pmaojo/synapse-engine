@@ -1,6 +1,6 @@
 [package]
 name = "synapse-core"
-version = "0.8.4"
+version = "0.8.5"
 edition.workspace = true
 description = "A neuro-symbolic semantic engine for OpenClaw, combining graph databases with vector operations."
 readme = "README.md"
@@ -12,6 +12,10 @@ categories = ["database", "science"]
 [[bin]]
 name = "synapse"
 path = "src/main.rs"
+
+[[bin]]
+name = "vector_test"
+path = "tests/vector_load_test.rs"
 
 [dependencies]
 regex = "1.10"

@@ -1077,6 +1077,8 @@ impl McpStdioServer {
             .get("namespace")
             .and_then(|v| v.as_str())
             .unwrap_or("default");
+            
+        eprintln!("DEBUG: MCP call_vector_stats for namespace: {}", namespace);
 
         let store = match self.engine.get_store(namespace) {
             Ok(s) => s,

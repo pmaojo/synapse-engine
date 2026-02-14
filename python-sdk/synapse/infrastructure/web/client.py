@@ -1,207 +1,190 @@
 """
-gRPC Client for Semantic Engine (Rust Backend)
-Provides a Python interface to the production Rust graph storage
+MCP Client for Semantic Engine (Rust Backend)
+Provides a Python interface to the production Rust graph storage via mcporter
 """
-import grpc
+import subprocess
+import json
 from typing import List, Tuple, Optional
-import sys
 import os
-
-try:
-    # Import generated protobuf files with absolute path
-    import synapse.infrastructure.web.semantic_engine_pb2 as pb2
-    import synapse.infrastructure.web.semantic_engine_pb2_grpc as pb2_grpc
-except ImportError as e:
-    print(f"⚠️  gRPC stubs not found: {e}")
-    print("Run: python -m grpc_tools.protoc -I./crates/semantic-engine/proto --python_out=./agents/infrastructure/web --grpc_python_out=./agents/infrastructure/web ./crates/semantic-engine/proto/semantic_engine.proto")
-    pb2 = None
-    pb2_grpc = None
 
 class SemanticEngineClient:
     """
-    Python client for the Rust semantic-engine gRPC server.
+    Python client for the Rust semantic-engine via mcporter.
     Provides persistent, production-grade graph storage.
     """
-    def __init__(self, host: str = "localhost", port: int = 50051):
-        self.address = f"{host}:{port}"
-        self.channel = None
-        self.stub = None
-        self.connected = False
-        self.token = os.getenv("SYNAPSE_ADMIN_TOKEN", "admin_token")
+    def __init__(self, namespace: str = "default"):
+        self.default_namespace = namespace
         
     def connect(self) -> bool:
-        """Establish connection to Rust server"""
+        """Verify mcporter is available"""
         try:
-            self.channel = grpc.insecure_channel(self.address)
-            # Add metadata interceptor for token
-            self.stub = pb2_grpc.SemanticEngineStub(self.channel)
-            self.connected = True
-            print(f"✅ Connected to Rust backend at {self.address}")
+            subprocess.run(["mcporter", "--version"], capture_output=True, check=True)
             return True
-        except Exception as e:
-            self.connected = False
-            print(f"⚠️  Could not connect to Rust backend: {e}")
+        except Exception:
+            print("⚠️  mcporter not found in PATH")
             return False
 
-    def _get_metadata(self):
-        return [('authorization', f'Bearer {self.token}')]
-    
-    def ingest_triples(self, triples: List[dict], namespace: str = "") -> dict:
-        """
-        Send triples to Rust backend for storage.
-        
-        Args:
-            triples: List of dicts with 'subject', 'predicate', 'object', and optional 'provenance'
-            namespace: Optional tenant ID for multi-tenancy
-            
-        Returns:
-            dict with 'nodes_added' and 'edges_added'
-        """
-        if not self.connected:
-            if not self.connect():
-                return {"error": "Not connected to Rust backend"}
+    def _call_tool(self, tool: str, arguments: dict) -> dict:
+        # We use --output json but we must be careful with mcporter's output
+        cmd = ["mcporter", "call", f"synapse.{tool}", "--output", "json"]
+        for k, v in arguments.items():
+            cmd.append(f"{k}={json.dumps(v)}")
         
         try:
-            pb_triples = []
-            for t in triples:
-                triple_msg = pb2.Triple(
-                    subject=t["subject"],
-                    predicate=t["predicate"],
-                    object=t["object"]
-                )
-                if "provenance" in t and t["provenance"]:
-                    prov = t["provenance"]
-                    triple_msg.provenance.CopyFrom(pb2.Provenance(
-                        source=prov.get("source", ""),
-                        timestamp=prov.get("timestamp", ""),
-                        method=prov.get("method", "")
-                    ))
-                pb_triples.append(triple_msg)
-
-            request = pb2.IngestRequest(
-                triples=pb_triples,
-                namespace=namespace
-            )
-            response = self.stub.IngestTriples(request, metadata=self._get_metadata())
-            return {
-                "nodes_added": response.nodes_added,
-                "edges_added": response.edges_added
-            }
+            result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+            stdout = result.stdout.split("[mcporter]")[0].strip()
+            
+            # Try to parse as pure JSON first
+            try:
+                return json.loads(stdout)
+            except json.JSONDecodeError:
+                # If it's the JS-like object { content: [...], isError: ... }
+                # we try to extract the text from content
+                import re
+                text_match = re.search(r"text:\s*'([^']*)'", stdout)
+                if text_match:
+                    text_content = text_match.group(1)
+                    try:
+                        return json.loads(text_content)
+                    except:
+                        return {"message": text_content, "isError": "isError: true" in stdout}
+                
+                return {"error": "Failed to parse MCP output", "raw": stdout}
+                
+        except subprocess.CalledProcessError as e:
+            return {"error": e.stderr or str(e)}
         except Exception as e:
             return {"error": str(e)}
 
-    def hybrid_search(self, query: str, namespace: str = "", vector_k: int = 10, graph_depth: int = 1) -> List[dict]:
-        """Perform hybrid search"""
-        if not self.connected:
-            if not self.connect(): return []
-        try:
-            request = pb2.HybridSearchRequest(
-                query=query,
-                namespace=namespace,
-                vector_k=vector_k,
-                graph_depth=graph_depth,
-                mode=1 # Hybrid
-            )
-            response = self.stub.HybridSearch(request, metadata=self._get_metadata())
-            return [{"uri": r.uri, "score": r.score, "content": r.content} for r in response.results]
-        except Exception as e:
-            print(f"Error in search: {e}")
+    def ingest_triples(self, triples: List[dict], namespace: Optional[str] = None) -> dict:
+        """Send triples to Rust backend via MCP"""
+        ns = namespace or self.default_namespace
+        response = self._call_tool("ingest_triples", {
+            "triples": triples,
+            "namespace": ns
+        })
+        if "error" in response:
+            return response
+            
+        # Extract from content if wrapped
+        if isinstance(response, list) and len(response) > 0:
+            text = response[0].get("text", "{}")
+            try:
+                return json.loads(text)
+            except:
+                return {"message": text}
+        return response
+
+    def hybrid_search(self, query: str, namespace: Optional[str] = None, vector_k: int = 10, graph_depth: int = 1) -> List[dict]:
+        """Perform hybrid search via MCP"""
+        ns = namespace or self.default_namespace
+        response = self._call_tool("hybrid_search", {
+            "query": query,
+            "namespace": ns,
+            "vector_k": vector_k,
+            "graph_depth": graph_depth
+        })
+        if "error" in response:
+            print(f"Error in search: {response['error']}")
             return []
-    
-    def get_neighbors(self, node_id: int, namespace: str = "") -> List[dict]:
-        """Get neighbors of a node by ID"""
-        if not self.connected:
-            if not self.connect():
-                return []
         
+        # Parse the inner JSON result from MCP
         try:
-            request = pb2.NodeRequest(node_id=node_id, namespace=namespace)
-            response = self.stub.GetNeighbors(request, metadata=self._get_metadata())
-            return [
-                {"node_id": n.node_id, "edge_type": n.edge_type}
-                for n in response.neighbors
-            ]
-        except Exception as e:
-            print(f"Error getting neighbors: {e}")
+            # Synapse returns SearchToolResult as JSON string in the first content item
+            # or directly if mcporter handles it.
+            # Based on mcp_stdio.rs: serialize_result returns a JSON string.
+            if isinstance(response, list) and len(response) > 0:
+                data = json.loads(response[0].get("text", "{}"))
+                return data.get("results", [])
+            elif isinstance(response, dict) and "results" in response:
+                return response["results"]
             return []
-    
-    def resolve_id(self, name: str, namespace: str = "") -> Optional[int]:
-        """Resolve a string name to a node ID"""
-        if not self.connected:
-            if not self.connect():
-                return None
-        
-        try:
-            request = pb2.ResolveRequest(content=name, namespace=namespace)
-            response = self.stub.ResolveId(request, metadata=self._get_metadata())
-            return response.node_id if response.found else None
         except Exception as e:
-            print(f"Error resolving ID: {e}")
-            return None
-    
-    def get_all_triples(self, namespace: str = "") -> List[dict]:
-        """Get all stored triples from Rust backend, including provenance"""
-        if not self.connected:
-            if not self.connect():
+            print(f"Failed to parse search results: {e}")
+            return []
+
+    def sparql_query(self, query: str, namespace: Optional[str] = None) -> List[dict]:
+        """Execute SPARQL query via MCP"""
+        ns = namespace or self.default_namespace
+        response = self._call_tool("sparql_query", {
+            "query": query,
+            "namespace": ns
+        })
+        
+        if "error" in response:
+            print(f"Error in SPARQL: {response['error']}")
+            return []
+        
+        if isinstance(response, list):
+            return response
+            
+        if isinstance(response, dict):
+            if response.get("isError"):
+                print(f"SPARQL Tool Error: {response.get('message')}")
                 return []
+            
+            # If message contains JSON string
+            message = response.get("message", "")
+            if message.startswith("[") or message.startswith("{"):
+                try:
+                    return json.loads(message)
+                except:
+                    pass
+            
+        return []
+
+    def get_all_triples(self, namespace: Optional[str] = None) -> List[dict]:
+        """Get all triples via MCP list_triples"""
+        ns = namespace or self.default_namespace
+        response = self._call_tool("list_triples", {
+            "namespace": ns,
+            "limit": 10000
+        })
+        if "error" in response:
+            return []
         
         try:
-            request = pb2.EmptyRequest(namespace=namespace)
-            response = self.stub.GetAllTriples(request, metadata=self._get_metadata())
-            result = []
-            for t in response.triples:
-                triple_dict = {
-                    "subject": t.subject,
-                    "predicate": t.predicate,
-                    "object": t.object
-                }
-                if t.HasField("provenance"):
-                    triple_dict["provenance"] = {
-                        "source": t.provenance.source,
-                        "timestamp": t.provenance.timestamp,
-                        "method": t.provenance.method
-                    }
-                result.append(triple_dict)
-            return result
-        except Exception as e:
-            print(f"Error getting triples: {e}")
+            if isinstance(response, dict) and "triples" in response:
+                return response["triples"]
+            return []
+        except Exception:
             return []
 
     def delete_tenant_data(self, namespace: str) -> dict:
-        """Delete all data for a tenant"""
-        if not self.connected:
-            if not self.connect():
-                return {"success": False, "message": "Not connected to Rust backend"}
-
-        try:
-            request = pb2.EmptyRequest(namespace=namespace)
-            response = self.stub.DeleteNamespaceData(request, metadata=self._get_metadata())
-            return {
-                "success": response.success,
-                "message": response.message
-            }
-        except Exception as e:
-            return {"success": False, "message": str(e)}
+        """Delete namespace data via MCP"""
+        return self._call_tool("delete_namespace", {"namespace": namespace})
     
-    def ingest_text(self, uri: str, content: str, namespace: str = "") -> dict:
-        """Ingest text content into the vector store"""
-        if not self.connected:
-            if not self.connect():
-                return {"error": "Not connected"}
-        
-        # We use ingest_triples with a special predicate or just use a new RPC if defined
-        # For now, let's use the standard ingest RPC with a specific structure
-        # (Though the Rust side needs to handle this)
-        # Actually, let's just stick to what the .proto supports.
-        return self.ingest_triples([
-            {"subject": uri, "predicate": "synapse:content", "object": content}
-        ], namespace=namespace)
+    def ingest_text(self, uri: str, content: str, namespace: Optional[str] = None) -> dict:
+        """Ingest text via MCP"""
+        ns = namespace or self.default_namespace
+        return self._call_tool("ingest_text", {
+            "uri": uri,
+            "content": content,
+            "namespace": ns
+        })
+
+    def apply_reasoning(self, namespace: Optional[str] = None, strategy: str = "rdfs", materialize: bool = False) -> dict:
+        """Apply reasoning via MCP"""
+        ns = namespace or self.default_namespace
+        return self._call_tool("apply_reasoning", {
+            "namespace": ns,
+            "strategy": strategy,
+            "materialize": materialize
+        })
 
     def close(self):
-        """Close the gRPC channel"""
-        if self.channel:
-            self.channel.close()
-            self.connected = False
+        """No-op for MCP CLI-based client"""
+        pass
+
+# Global singleton instance
+_client = None
+
+def get_client() -> SemanticEngineClient:
+    """Get or create the global client instance"""
+    global _client
+    if _client is None:
+        _client = SemanticEngineClient()
+    return _client
 
 # Global singleton instance
 _client = None

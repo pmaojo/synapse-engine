@@ -15,6 +15,6 @@
     "name": "kthulu-go",
     "description": "Kthulu Go AI-Native Software Foundry mastering.",
     "version": "1.0.0",
-    "location": "./scenarios/kthulu-go"
+    "location": "/home/robin/workspace/projects/synapse-engine/scenarios/kthulu-go"
   }
 ]
