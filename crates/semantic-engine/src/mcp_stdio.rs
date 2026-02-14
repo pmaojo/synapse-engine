@@ -42,7 +42,7 @@ impl McpStdioServer {
             if let Ok(request) = serde_json::from_str::<McpRequest>(trimmed) {
                 let is_notification = request.id.is_none();
                 let response = self.handle_request(request).await;
-                
+
                 // Only send response if it's not a notification
                 if !is_notification {
                     let response_json = serde_json::to_string(&response)? + "\n";

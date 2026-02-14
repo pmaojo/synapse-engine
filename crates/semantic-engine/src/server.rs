@@ -159,10 +159,11 @@ impl MySemanticEngine {
     pub fn get_store(&self, namespace: &str) -> Result<Arc<SynapseStore>, Status> {
         // Use entry API to ensure atomicity
         let store = self.stores.entry(namespace.to_string()).or_insert_with(|| {
-            let s = SynapseStore::open(namespace, &self.storage_path).expect("Failed to open store");
+            let s =
+                SynapseStore::open(namespace, &self.storage_path).expect("Failed to open store");
             Arc::new(s)
         });
-        
+
         Ok(store.value().clone())
     }
 }

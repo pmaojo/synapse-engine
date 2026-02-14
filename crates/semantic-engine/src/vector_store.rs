@@ -1,6 +1,6 @@
 use crate::persistence::{load_bincode, save_bincode};
 use anyhow::Result;
-use fastembed::{InitOptions, TextEmbedding, EmbeddingModel};
+use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
 use hnsw::Hnsw;
 use rand_pcg::Pcg64;
 use serde::{Deserialize, Serialize};
@@ -97,14 +97,14 @@ impl VectorStore {
 
         // Initialize FastEmbed model
         // We use BGESmallENV15 as it is small and effective (384 dims)
-        let model_opts = InitOptions::new(EmbeddingModel::BGESmallENV15)
-            .with_show_download_progress(true);
-        
+        let model_opts =
+            InitOptions::new(EmbeddingModel::BGESmallENV15).with_show_download_progress(true);
+
         // Use custom cache dir if specified
         let model_opts = if let Ok(cache_path) = std::env::var("FASTEMBED_CACHE_PATH") {
-             model_opts.with_cache_dir(PathBuf::from(cache_path))
+            model_opts.with_cache_dir(PathBuf::from(cache_path))
         } else {
-             model_opts
+            model_opts
         };
 
         let model = TextEmbedding::try_new(model_opts)?;
@@ -238,11 +238,15 @@ impl VectorStore {
         // Note: model.embed is not async, but it's fast enough for small batches
         // We could wrap it in spawn_blocking if needed, but for now we'll keep it simple
         let embeddings = self.model.embed(texts, None)?;
-        
+
         let mut results = Vec::new();
         for item in embeddings {
             if item.len() != self.dimensions {
-                anyhow::bail!("Expected {} dimensions, got {}", self.dimensions, item.len());
+                anyhow::bail!(
+                    "Expected {} dimensions, got {}",
+                    self.dimensions,
+                    item.len()
+                );
             }
             results.push(item);
         }
