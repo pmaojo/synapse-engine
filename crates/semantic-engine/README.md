@@ -44,7 +44,7 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-synapse-core = "0.2.0"
+synapse-core = "0.8.4"
 ```
 
 ### As a Binary
