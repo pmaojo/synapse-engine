@@ -216,7 +216,12 @@ impl SynapseStore {
                     GraphName::DefaultGraph,
                 ))?;
 
-                GraphName::NamedNode(batch_node)
+                // If source is "mcp", put triples in default graph for easier querying
+                if p.source == "mcp" {
+                    GraphName::DefaultGraph
+                } else {
+                    GraphName::NamedNode(batch_node)
+                }
             } else {
                 GraphName::DefaultGraph
             };
