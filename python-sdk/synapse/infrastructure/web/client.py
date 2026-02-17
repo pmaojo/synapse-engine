@@ -177,20 +177,10 @@ class SemanticEngineClient:
         pass
 
 # Global singleton instance
-_client = None
+_client: Optional[SemanticEngineClient] = None
 
 def get_client() -> SemanticEngineClient:
-    """Get or create the global client instance"""
-    global _client
-    if _client is None:
-        _client = SemanticEngineClient()
-    return _client
-
-# Global singleton instance
-_client = None
-
-def get_client() -> SemanticEngineClient:
-    """Get or create the global client instance"""
+    """Get or create the global client instance and eagerly verify connectivity."""
     global _client
     if _client is None:
         _client = SemanticEngineClient()
