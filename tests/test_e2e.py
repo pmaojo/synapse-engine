@@ -1,78 +1,65 @@
-import pytest
 import os
 import sys
-from typing import List
+
+import pytest
 
 # Add the project root to sys.path to allow importing synapse
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../python-sdk")))
 
 from synapse.infrastructure.web.client import SemanticEngineClient
 
-@pytest.fixture
-def client():
-    """Provides a SemanticEngineClient instance."""
-    client = SemanticEngineClient(host="localhost", port=50051)
-    # We don't call connect() here to allow tests to handle connection failure
-    return client
 
-def test_client_connection(client):
-    """
-    Test that the client can connect to the Rust backend.
-    Note: This test requires the Rust server to be running.
-    """
-    is_connected = client.connect()
-    if not is_connected:
-        pytest.skip("Rust backend not running at localhost:50051")
-    assert client.connected is True
+def test_client_connection_success(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Client reports connection when mcporter is available."""
 
-def test_ingest_and_resolve(client):
-    """Test ingesting a triple and resolving the node ID."""
-    if not client.connect():
-        pytest.skip("Rust backend not running")
-        
-    test_namespace = "test_e2e_namespace"
-    
-    # Clean up before test
-    client.delete_tenant_data(test_namespace)
-    
+    def _fake_run(*_args, **_kwargs):
+        class _Result:
+            pass
+
+        return _Result()
+
+    monkeypatch.setattr("subprocess.run", _fake_run)
+
+    client = SemanticEngineClient(namespace="test")
+    assert client.connect() is True
+
+
+def test_client_connection_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Client reports disconnection when mcporter invocation fails."""
+
+    def _raise_error(*_args, **_kwargs):
+        raise FileNotFoundError("mcporter not found")
+
+    monkeypatch.setattr("subprocess.run", _raise_error)
+
+    client = SemanticEngineClient(namespace="test")
+    assert client.connect() is False
+
+
+def test_ingest_triples_parses_wrapped_content(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Client extracts JSON content wrapped in MCP list payloads."""
+
+    wrapped_response = [{"text": '{"nodes_added": 1, "edges_added": 1}'}]
+    client = SemanticEngineClient(namespace="test")
+    monkeypatch.setattr(client, "_call_tool", lambda *_args, **_kwargs: wrapped_response)
+
+    result = client.ingest_triples(
+        [{"subject": "Synapse", "predicate": "isA", "object": "MemoryEngine"}],
+    )
+
+    assert result["nodes_added"] == 1
+    assert result["edges_added"] == 1
+
+
+def test_get_all_triples_returns_expected_payload(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Client returns triples from list_triples response."""
+
     triples = [
-        {"subject": "Synapse", "predicate": "isA", "object": "MemoryEngine"}
+        {"subject": "s1", "predicate": "p1", "object": "o1"},
+        {"subject": "s2", "predicate": "p2", "object": "o2"},
     ]
-    
-    result = client.ingest_triples(triples, namespace=test_namespace)
-    assert "error" not in result
-    assert result["nodes_added"] >= 1
-    assert result["edges_added"] >= 1
-    
-    node_id = client.resolve_id("Synapse", namespace=test_namespace)
-    assert node_id is not None
-    
-    # Cleanup
-    client.delete_tenant_data(test_namespace)
-    client.close()
+    client = SemanticEngineClient(namespace="test")
+    monkeypatch.setattr(client, "_call_tool", lambda *_args, **_kwargs: {"triples": triples})
 
-def test_get_all_triples(client):
-    """Test retrieving all triples for a namespace."""
-    if not client.connect():
-        pytest.skip("Rust backend not running")
-        
-    test_namespace = "test_get_all_namespace"
-    client.delete_tenant_data(test_namespace)
-    
-    triples = [
-        {"subject": "Alice", "predicate": "knows", "object": "Bob"},
-        {"subject": "Bob", "predicate": "knows", "object": "Charlie"}
-    ]
-    
-    client.ingest_triples(triples, namespace=test_namespace)
-    
-    all_triples = client.get_all_triples(namespace=test_namespace)
-    assert len(all_triples) == 2
-    
-    subjects = [t["subject"] for t in all_triples]
-    assert "http://synapse.os/Alice" in subjects
-    assert "http://synapse.os/Bob" in subjects
-    
-    # Cleanup
-    client.delete_tenant_data(test_namespace)
-    client.close()
+    result = client.get_all_triples()
+    assert result == triples
