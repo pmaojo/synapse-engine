@@ -35,6 +35,7 @@ anyhow = "1.0"
 dashmap = "5.5"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }  # For HuggingFace API
 jsonschema = "0.18"  # JSON Schema validation for MCP
+openssl = { version = "0.10", features = ["vendored"] } # Use vendored OpenSSL for static musl builds
 chrono = { version = "0.4", features = ["serde"] }  # Timestamps for audit
 
 # Vector search dependencies (lightweight)
