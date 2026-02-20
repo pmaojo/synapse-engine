@@ -1,7 +1,8 @@
 FROM rust:1.88-alpine as builder
 
-# Add edge/community repository for onnxruntime
-RUN echo "http://dl-cdn.alpinelinux.org/alpine/edge/community" >> /etc/apk/repositories
+# Add edge repositories for onnxruntime and its dependencies (abseil-cpp, protobuf)
+RUN echo "http://dl-cdn.alpinelinux.org/alpine/edge/main" >> /etc/apk/repositories && \
+    echo "http://dl-cdn.alpinelinux.org/alpine/edge/community" >> /etc/apk/repositories
 
 # Install build dependencies
 # - musl-dev, gcc, g++, make: Standard build tools
@@ -9,6 +10,8 @@ RUN echo "http://dl-cdn.alpinelinux.org/alpine/edge/community" >> /etc/apk/repos
 # - protobuf: Required for prost-build (protoc)
 # - openssl-dev: Required for linking against system OpenSSL (dynamic)
 # - onnxruntime-dev: Required for linking against system ONNX Runtime (dynamic)
+# - abseil-cpp-dev: Required by onnxruntime-dev
+# - protobuf-dev: Required by onnxruntime-dev (for libprotobuf-lite)
 # - pkgconfig: Required to find system libraries
 # - clang, clang-dev: Required by some crates
 # - git: Required by cargo
@@ -22,6 +25,8 @@ RUN apk update && apk add --no-cache \
     protobuf \
     openssl-dev \
     onnxruntime-dev \
+    abseil-cpp-dev \
+    protobuf-dev \
     pkgconfig \
     clang \
     clang-dev
@@ -36,15 +41,16 @@ ENV OPENSSL_NO_VENDOR=1
 ENV ORT_STRATEGY=system
 
 # Build the binary
-# Note: The resulting binary will be dynamically linked against musl, openssl, and onnxruntime
+# Note: The resulting binary will be dynamically linked against musl, openssl, onnxruntime, abseil, and protobuf
 # This is required because onnxruntime static binaries are not available for musl
 RUN cargo build --release -p synapse-core
 
 # Final stage
 FROM alpine:edge
 
-# Add edge/community repository for onnxruntime
-RUN echo "http://dl-cdn.alpinelinux.org/alpine/edge/community" >> /etc/apk/repositories
+# Add edge repositories for runtime dependencies
+RUN echo "http://dl-cdn.alpinelinux.org/alpine/edge/main" >> /etc/apk/repositories && \
+    echo "http://dl-cdn.alpinelinux.org/alpine/edge/community" >> /etc/apk/repositories
 
 # Install runtime dependencies
 RUN apk add --no-cache \
@@ -52,6 +58,8 @@ RUN apk add --no-cache \
     libstdc++ \
     openssl \
     onnxruntime \
+    abseil-cpp \
+    protobuf \
     ca-certificates
 
 # Copy the binary from the builder stage
