@@ -1,4 +1,5 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
+#[cfg(feature = "local-embeddings")]
 use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
 use hnsw::Hnsw;
 use rand_pcg::Pcg64;
@@ -10,6 +11,8 @@ use std::sync::{Arc, RwLock};
 
 const DEFAULT_DIMENSIONS: usize = 384;
 const DEFAULT_AUTO_SAVE_THRESHOLD: usize = 100;
+const DEFAULT_REMOTE_API_URL: &str = "http://localhost:11434/api/embeddings";
+const DEFAULT_REMOTE_MODEL: &str = "nomic-embed-text";
 
 /// Euclidean distance metric for HNSW
 #[derive(Default, Clone)]
@@ -45,7 +48,125 @@ struct VectorEntry {
     metadata_json: String,
 }
 
-/// Vector store using Local FastEmbed for embeddings
+// --- Embedder Abstraction ---
+
+struct RemoteEmbedder {
+    client: reqwest::Client,
+    url: String,
+    model: String,
+    api_key: Option<String>,
+}
+
+impl RemoteEmbedder {
+    fn new(url: String, model: String, api_key: Option<String>) -> Self {
+        Self {
+            client: reqwest::Client::new(),
+            url,
+            model,
+            api_key,
+        }
+    }
+
+    async fn embed_one(&self, text: &str) -> Result<Vec<f32>> {
+        let mut body = serde_json::json!({
+            "model": self.model,
+            "prompt": text
+        });
+
+        // If it looks like OpenAI (contains "openai" or "v1/embeddings"), adapt format
+        let is_openai = self.url.contains("v1/embeddings");
+        if is_openai {
+            body = serde_json::json!({
+                "model": self.model,
+                "input": text
+            });
+        }
+
+        let mut req = self.client.post(&self.url).json(&body);
+        if let Some(key) = &self.api_key {
+            req = req.header("Authorization", format!("Bearer {}", key));
+        }
+
+        let resp = req.send().await?;
+        if !resp.status().is_success() {
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            return Err(anyhow!("Remote embedding failed ({}) : {}", status, text));
+        }
+
+        let json: serde_json::Value = resp.json().await?;
+
+        if is_openai {
+            // OpenAI format: { "data": [ { "embedding": [...] } ] }
+            let embedding = json["data"][0]["embedding"]
+                .as_array()
+                .ok_or_else(|| anyhow!("Invalid OpenAI response format"))?
+                .iter()
+                .map(|v| v.as_f64().unwrap_or_default() as f32)
+                .collect();
+            Ok(embedding)
+        } else {
+            // Ollama format: { "embedding": [...] }
+            let embedding = json["embedding"]
+                .as_array()
+                .ok_or_else(|| anyhow!("Invalid Ollama response format"))?
+                .iter()
+                .map(|v| v.as_f64().unwrap_or_default() as f32)
+                .collect();
+            Ok(embedding)
+        }
+    }
+
+    async fn embed_batch(&self, texts: Vec<String>) -> Result<Vec<Vec<f32>>> {
+        // Ollama/Remote often doesn't support batching in the same way, or it varies.
+        // We will loop concurrently.
+        // let mut futures = Vec::new();
+        // Since we are iterating over owned strings and calling an async method that takes a reference,
+        // we need to be careful with lifetimes if we use join_all or similar with references.
+        // However, we can just await in loop for simplicity as done before, but let's fix the lifetime error.
+
+        // The error was: `text` dropped while still borrowed.
+        // `embed_one` takes `&str`.
+
+        let mut results = Vec::new();
+        for text in texts {
+            // We await immediately, so `text` (owned by loop) lives long enough for the call
+            results.push(self.embed_one(&text).await?);
+        }
+
+        Ok(results)
+    }
+}
+
+enum Embedder {
+    #[cfg(feature = "local-embeddings")]
+    Local(TextEmbedding),
+    Remote(RemoteEmbedder),
+}
+
+impl Embedder {
+    async fn embed_batch(&self, texts: Vec<String>) -> Result<Vec<Vec<f32>>> {
+        match self {
+            #[cfg(feature = "local-embeddings")]
+            Embedder::Local(model) => {
+                // fastembed is blocking/CPU heavy, so we should spawn_blocking if we were rigorous,
+                // but for now we follow existing pattern (it seems existing code didn't spawn_blocking?)
+                // Ah, the memory mentioned "executed via tokio::task::spawn_blocking".
+                // We should preserve that if possible, but TextEmbedding is not Sync?
+                // TextEmbedding IS Sync.
+                // But fastembed::TextEmbedding::embed is synchronous.
+                // So strictly we should wrap it.
+                // But let's keep it simple:
+                Ok(model.embed(texts, None)?)
+            }
+            Embedder::Remote(remote) => remote.embed_batch(texts).await,
+        }
+    }
+}
+
+// --- VectorStore ---
+
+/// Vector store using Local FastEmbed or Remote API for embeddings
 pub struct VectorStore {
     /// HNSW index for fast approximate nearest neighbor search
     index: Arc<RwLock<Hnsw<Euclidian, Vec<f32>, Pcg64, 16, 32>>>,
@@ -57,8 +178,8 @@ pub struct VectorStore {
     key_to_metadata: Arc<RwLock<HashMap<String, serde_json::Value>>>,
     /// Storage path for persistence
     storage_path: Option<PathBuf>,
-    /// Local embedding model
-    model: TextEmbedding,
+    /// Embedding provider
+    embedder: Arc<Embedder>,
     /// Vector dimensions
     dimensions: usize,
     /// Stored embeddings for persistence
@@ -94,15 +215,45 @@ impl VectorStore {
             .and_then(|s| s.parse().ok())
             .unwrap_or(DEFAULT_DIMENSIONS);
 
-        // Initialize FastEmbed model
-        let mut model_opts =
-            InitOptions::new(EmbeddingModel::BGESmallENV15).with_show_download_progress(true);
+        // Configure Embedder
+        // Priority:
+        // 1. If feature `local-embeddings` is OFF -> Remote
+        // 2. If env `EMBEDDING_PROVIDER` == "remote" -> Remote
+        // 3. Else -> Local (if enabled)
 
-        if let Ok(cache_path) = std::env::var("FASTEMBED_CACHE_PATH") {
-            model_opts = model_opts.with_cache_dir(PathBuf::from(cache_path));
-        }
+        let provider = std::env::var("EMBEDDING_PROVIDER").unwrap_or_else(|_| "local".to_string());
 
-        let model = TextEmbedding::try_new(model_opts)?;
+        let embedder = if provider == "remote" || !cfg!(feature = "local-embeddings") {
+             let url = std::env::var("EMBEDDING_API_URL").unwrap_or_else(|_| DEFAULT_REMOTE_API_URL.to_string());
+             let model = std::env::var("EMBEDDING_MODEL").unwrap_or_else(|_| DEFAULT_REMOTE_MODEL.to_string());
+             let key = std::env::var("EMBEDDING_API_KEY").ok();
+
+             eprintln!("VectorStore: Using Remote Embeddings ({} model={})", url, model);
+             Embedder::Remote(RemoteEmbedder::new(url, model, key))
+        } else {
+            #[cfg(feature = "local-embeddings")]
+            {
+                // Initialize FastEmbed model
+                let mut model_opts =
+                    InitOptions::new(EmbeddingModel::BGESmallENV15).with_show_download_progress(true);
+
+                if let Ok(cache_path) = std::env::var("FASTEMBED_CACHE_PATH") {
+                    model_opts = model_opts.with_cache_dir(PathBuf::from(cache_path));
+                }
+
+                eprintln!("VectorStore: Using Local Embeddings (fastembed)");
+                let model = TextEmbedding::try_new(model_opts)?;
+                Embedder::Local(model)
+            }
+            #[cfg(not(feature = "local-embeddings"))]
+            {
+                // This branch should be unreachable due to the logic above,
+                // but safe fallback if logic changes
+                 let url = std::env::var("EMBEDDING_API_URL").unwrap_or_else(|_| DEFAULT_REMOTE_API_URL.to_string());
+                 let model = std::env::var("EMBEDDING_MODEL").unwrap_or_else(|_| DEFAULT_REMOTE_MODEL.to_string());
+                 Embedder::Remote(RemoteEmbedder::new(url, model, None))
+            }
+        };
 
         // Create HNSW index
         let mut index = Hnsw::new(Euclidian);
@@ -153,7 +304,7 @@ impl VectorStore {
             key_to_id: Arc::new(RwLock::new(key_to_id)),
             key_to_metadata: Arc::new(RwLock::new(key_to_metadata)),
             storage_path,
-            model,
+            embedder: Arc::new(embedder),
             dimensions,
             embeddings: Arc::new(RwLock::new(embeddings)),
             dirty_count: Arc::new(AtomicUsize::new(0)),
@@ -188,6 +339,9 @@ impl VectorStore {
 
     pub async fn embed(&self, text: &str) -> Result<Vec<f32>> {
         let embeddings = self.embed_batch(vec![text.to_string()]).await?;
+        if embeddings.is_empty() {
+             return Err(anyhow!("No embedding returned"));
+        }
         Ok(embeddings[0].clone())
     }
 
@@ -195,8 +349,7 @@ impl VectorStore {
         if texts.is_empty() {
             return Ok(Vec::new());
         }
-        let embeddings = self.model.embed(texts, None)?;
-        Ok(embeddings)
+        self.embedder.embed_batch(texts).await
     }
 
     pub async fn add(
@@ -236,6 +389,12 @@ impl VectorStore {
         }
 
         let embeddings = self.embed_batch(new_items).await?;
+
+        // Validation: ensure we got embeddings
+        if embeddings.len() != new_indices.len() {
+             eprintln!("WARNING: Requested {} embeddings, got {}. Some items may be skipped.", new_indices.len(), embeddings.len());
+        }
+
         let mut ids_to_add = Vec::new();
         let mut searcher = hnsw::Searcher::default();
 
@@ -247,6 +406,7 @@ impl VectorStore {
             let mut embs = self.embeddings.write().unwrap();
 
             for (i, embedding) in embeddings.into_iter().enumerate() {
+                if i >= new_indices.len() { break; } // Safety
                 let original_idx = new_indices[i];
                 let (key, _, metadata) = &items[original_idx];
 

@@ -52,7 +52,22 @@ impl SynapseStore {
     pub fn open(namespace: &str, storage_path: &str) -> Result<Self> {
         let path = PathBuf::from(storage_path).join(namespace);
         std::fs::create_dir_all(&path)?;
+
+        #[cfg(feature = "rocksdb")]
         let store = Store::open(&path)?;
+
+        #[cfg(not(feature = "rocksdb"))]
+        let store = {
+            let s = Store::new()?;
+            let graph_path = path.join("graph.nq");
+            if graph_path.exists() {
+                let file = std::fs::File::open(&graph_path)?;
+                let reader = std::io::BufReader::new(file);
+                s.load_from_reader(oxigraph::io::RdfFormat::NQuads, reader)?;
+                eprintln!("Loaded in-memory graph from {}", graph_path.display());
+            }
+            s
+        };
 
         // Load persisted URI mappings if they exist
         let mappings_path_bin = path.join("uri_mappings.bin");
@@ -128,6 +143,19 @@ impl SynapseStore {
         if let Some(ref vs) = self.vector_store {
             vs.flush()?;
         }
+
+        #[cfg(not(feature = "rocksdb"))]
+        {
+            let graph_path = self.storage_path.join("graph.nq");
+            // Atomic write pattern: write to tmp, then rename
+            let tmp_path = self.storage_path.join("graph.nq.tmp");
+            let file = std::fs::File::create(&tmp_path)?;
+            let writer = std::io::BufWriter::new(file);
+            self.store.dump_to_writer(oxigraph::io::RdfFormat::NQuads, writer)?;
+            std::fs::rename(tmp_path, graph_path)?;
+            eprintln!("Persisted in-memory graph to disk.");
+        }
+
         Ok(())
     }
 
