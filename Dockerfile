@@ -28,7 +28,7 @@ COPY . .
 # Set environment variables for static build
 # OPENSSL_NO_VENDOR=1: Use system OpenSSL instead of building from source
 # OPENSSL_STATIC=1: Link against static OpenSSL libraries
-# RUSTFLAGS="-C target-feature=-crt-static": No, we want static CRT for musl (default)
+# RUSTFLAGS="-C target-feature=-crt-static": Not needed - musl targets use static CRT by default
 ENV OPENSSL_NO_VENDOR=1
 ENV OPENSSL_STATIC=1
 
