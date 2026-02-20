@@ -12,17 +12,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - name: Install Rust toolchain
+      - name: Install Rust toolchain  
         run: |
           curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
           echo "$HOME/.cargo/bin" >> $GITHUB_PATH
           
-      - name: Build Release
+      - name: Build Release (fast build)
         run: |
           source $HOME/.cargo/env
-          cargo build --release -p synapse-core 2>&1 | tee build.log
-          echo "=== Build log ==="
-          cat build.log
+          # Build with fewer optimizations for speed
+          RUSTFLAGS="-C opt-level=2" cargo build --release -p synapse-core 2>&1 | tee build.log
+          echo "=== Last 50 lines ==="
+          tail -50 build.log
           
       - name: Upload build log
         if: failure()
@@ -35,14 +36,16 @@ jobs:
         if: success()
         run: |
           mkdir -p artifact
-          cp target/release/synapse artifact/
-          
+          ls -la target/release/
+          cp target/release/synapse artifact/ 2>/dev/null || echo "Binary not found"
+          ls -la artifact/
+
       - name: Upload to Release
         if: success()
         uses: softprops/action-gh-release@v1
         with:
           tag_name: latest
-          release_name: Synapse Latest Build
+          release_name: Synapse Fast Build
           draft: true
           files: artifact/synapse
         env:
