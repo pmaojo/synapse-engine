@@ -1,0 +1,42 @@
+FROM rust:bookworm AS builder
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y \
+    protobuf-compiler \
+    clang \
+    libclang-dev \
+    cmake \
+    pkg-config \
+    libssl-dev \
+    git
+
+WORKDIR /usr/src/synapse
+COPY . .
+
+# Build the binary
+# We use the default release profile.
+# The binary will be dynamically linked to glibc 2.36 (from bookworm) and other system libs if not statically linked.
+# We do not set OPENSSL_NO_VENDOR=1 to allow default behavior (static linking if possible, or dynamic if configured).
+# But since we installed libssl-dev, openssl crate might use it.
+RUN cargo build --release -p synapse-core
+
+# Final stage
+FROM debian:bookworm-slim
+
+# Install runtime dependencies
+# libssl3: Required if linked dynamically against OpenSSL (default behavior on Debian often, but check Cargo.toml)
+# ca-certificates: For HTTPS
+# libgomp1: OpenMP runtime (often needed by onnxruntime)
+RUN apt-get update && apt-get install -y \
+    libssl3 \
+    ca-certificates \
+    libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=builder /usr/src/synapse/target/release/synapse /usr/local/bin/synapse
+
+ENV GRAPH_STORAGE_PATH=/data/graphs
+VOLUME /data/graphs
+EXPOSE 50051
+
+ENTRYPOINT ["synapse"]
