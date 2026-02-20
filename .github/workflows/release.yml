@@ -18,6 +18,9 @@ jobs:
           - os: ubuntu-latest
             target: x86_64-unknown-linux-musl
             artifact_name: synapse-linux-x64
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            artifact_name: synapse-linux-gnu-x64
           - os: macos-latest
             target: aarch64-apple-darwin
             artifact_name: synapse-macos-arm64
@@ -36,8 +39,8 @@ jobs:
           targets: ${{ matrix.target }}
 
       - name: Install Protoc and Clang (Linux)
-        if: matrix.os == 'ubuntu-latest'
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler clang libclang-dev musl-tools
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler clang libclang-dev musl-tools libssl-dev pkg-config
 
       - name: Install Protoc (macOS)
         if: matrix.os == 'macos-latest'

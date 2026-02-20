@@ -1,0 +1,58 @@
+FROM rust:bookworm AS builder
+
+# Install build dependencies
+# Note: libonnxruntime-dev is not available in Debian Bookworm (stable).
+# We rely on the `ort` crate to download the appropriate ONNX Runtime binary during build.
+# We install libabsl-dev as requested, though `ort` often bundles its own Abseil.
+RUN apt-get update && apt-get install -y \
+    protobuf-compiler \
+    clang \
+    libclang-dev \
+    cmake \
+    pkg-config \
+    libssl-dev \
+    libabsl-dev \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /usr/src/synapse
+COPY . .
+
+# Build the binary
+# The `ort` crate (via fastembed) will download the ONNX Runtime shared library to `target/release/build/ort-.../out/`.
+# This is the default strategy when ORT_STRATEGY is not set or set to "download".
+RUN cargo build --release -p synapse-core
+
+# Locate and stage the downloaded ONNX Runtime library
+# We find any libonnxruntime.so* files in the target directory and copy them to a known location.
+RUN mkdir -p /tmp/ort_libs && \
+    find target/release/build -name "libonnxruntime.so*" -exec cp {} /tmp/ort_libs/ \;
+
+# Final stage
+FROM debian:bookworm-slim
+
+# Install runtime dependencies
+# libssl3: Required if linked dynamically against OpenSSL.
+# ca-certificates: For HTTPS.
+# libgomp1: OpenMP runtime (often needed by onnxruntime).
+RUN apt-get update && apt-get install -y \
+    libssl3 \
+    ca-certificates \
+    libgomp1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy the binary
+COPY --from=builder /usr/src/synapse/target/release/synapse /usr/local/bin/synapse
+
+# Copy the ONNX Runtime library (downloaded by `ort` during build)
+# This ensures the runtime has the required shared library.
+COPY --from=builder /tmp/ort_libs/libonnxruntime.so* /usr/local/lib/
+
+# Update shared library cache
+RUN ldconfig
+
+ENV GRAPH_STORAGE_PATH=/data/graphs
+VOLUME /data/graphs
+EXPOSE 50051
+
+ENTRYPOINT ["synapse"]
