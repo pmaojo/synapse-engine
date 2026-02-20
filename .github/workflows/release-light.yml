@@ -1,0 +1,52 @@
+name: Release Light Binaries
+
+on:
+  push:
+    tags:
+      - 'light-*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-light:
+    name: Build Light (RAM + Remote Embeddings)
+    runs-on: ubuntu-24.04
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.88
+
+      - name: Install Dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y protobuf-compiler clang libclang-dev cmake pkg-config libssl-dev
+
+      - name: Build Light Binary (no rocksdb, no local embeddings)
+        run: |
+          cd crates/semantic-engine
+          cargo build --release --no-default-features
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: synapse-light
+          path: crates/semantic-engine/target/release/synapse
+          retention-days: 5
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Synapse Light ${{ github.ref_name }}
+          body: |
+            Light build - RAM graph storage + Remote embeddings
+            - Use with `EMBEDDING_PROVIDER=remote`
+            - Requires external embeddings API (e.g., FastEmbed HTTP server)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
