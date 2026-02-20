@@ -1,6 +1,6 @@
 # Synapse 🧠⛓️
 
-**Synapse** is a high-performance, neuro-symbolic knowledge graph system designed to serve as the long-term memory for agentic AI. It bridges the gap between **unstructured semantic search (Vector RAG)** and **formal logical reasoning (Knowledge Graphs)**.
+**Synapse** is a high-performance, neuro-symbolic knowledge graph system designed to serve as the long-term memory for AI agents. It bridges the gap between **unstructured semantic search (Vector RAG)** and **formal logical reasoning (Knowledge Graphs)**.
 
 ## 🚀 Key Capabilities
 
