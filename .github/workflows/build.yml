@@ -12,13 +12,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
-      - name: Install Rust
-        uses: dtolnay/rust-action@stable
-        with:
-          toolchain: stable
-      
+      - name: Install Rust toolchain
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+          
       - name: Build Release
         run: |
+          source $HOME/.cargo/env
           cargo build --release -p synapse-core
           
       - name: Create artifact directory
@@ -26,13 +27,6 @@ jobs:
           mkdir -p artifact
           cp target/release/synapse artifact/
           
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: synapse-binary
-          path: artifact/synapse
-          retention-days: 1
-
       - name: Upload to Release
         uses: softprops/action-gh-release@v1
         with:
