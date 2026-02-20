@@ -29,14 +29,13 @@ jobs:
 
       - name: Build Light Binary (no rocksdb, no local embeddings)
         run: |
-          cd crates/semantic-engine
-          cargo build --release --no-default-features
+          cargo build --release --no-default-features -p synapse-core
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: synapse-light
-          path: crates/semantic-engine/target/release/synapse
+          path: target/release/synapse
           retention-days: 5
 
       - name: Create Release
