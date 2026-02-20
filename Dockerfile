@@ -14,6 +14,7 @@ RUN echo "http://dl-cdn.alpinelinux.org/alpine/edge/main" >> /etc/apk/repositori
 # - protobuf-dev: Required by onnxruntime-dev (for libprotobuf-lite)
 # - pkgconfig: Required to find system libraries
 # - clang, clang-dev: Required by some crates
+# - clang-static: Required for bindgen on musl (dynamic loading not supported)
 # - git: Required by cargo
 RUN apk update && apk add --no-cache \
     musl-dev \
@@ -29,7 +30,8 @@ RUN apk update && apk add --no-cache \
     protobuf-dev \
     pkgconfig \
     clang \
-    clang-dev
+    clang-dev \
+    clang-static
 
 WORKDIR /usr/src/synapse
 COPY . .
@@ -37,8 +39,12 @@ COPY . .
 # Set environment variables
 # OPENSSL_NO_VENDOR=1: Use system OpenSSL (dynamic)
 # ORT_STRATEGY=system: Use system ONNX Runtime (dynamic)
+# LIBCLANG_PATH: Explicitly point to the directory containing libclang.a/so
+# LIBCLANG_STATIC_PATH: Force bindgen to link statically against libclang
 ENV OPENSSL_NO_VENDOR=1
 ENV ORT_STRATEGY=system
+ENV LIBCLANG_PATH=/usr/lib
+ENV LIBCLANG_STATIC_PATH=/usr/lib
 
 # Build the binary
 # Note: The resulting binary will be dynamically linked against musl, openssl, onnxruntime, abseil, and protobuf
