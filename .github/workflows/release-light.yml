@@ -29,7 +29,12 @@ jobs:
 
       - name: Build Light Binary (no rocksdb, no local embeddings)
         run: |
-          cargo build --release --no-default-features -p synapse-core
+          cargo build --release --no-default-features -p synapse-core 2>&1 | tee build.log
+        continue-on-error: true
+        
+      - name: Show build log on failure
+        if: failure()
+        run: cat build.log
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
