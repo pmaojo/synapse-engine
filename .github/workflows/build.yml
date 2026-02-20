@@ -1,0 +1,44 @@
+name: Build Synapse
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install Rust
+        uses: dtolnay/rust-action@stable
+        with:
+          toolchain: stable
+      
+      - name: Build Release
+        run: |
+          cargo build --release -p synapse-core
+          
+      - name: Create artifact directory
+        run: |
+          mkdir -p artifact
+          cp target/release/synapse artifact/
+          
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: synapse-binary
+          path: artifact/synapse
+          retention-days: 1
+
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: latest
+          release_name: Synapse Latest Build
+          draft: true
+          files: artifact/synapse
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
