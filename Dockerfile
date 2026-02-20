@@ -1,14 +1,18 @@
 FROM rust:1.88-alpine as builder
 
+# Add edge/community repository for onnxruntime
+RUN echo "http://dl-cdn.alpinelinux.org/alpine/edge/community" >> /etc/apk/repositories
+
 # Install build dependencies
 # - musl-dev, gcc, g++, make: Standard build tools
 # - perl: Required for OpenSSL build scripts (if building from source)
 # - protobuf: Required for prost-build (protoc)
-# - openssl-dev, openssl-libs-static: Required for linking against system OpenSSL (static)
+# - openssl-dev: Required for linking against system OpenSSL (dynamic)
+# - onnxruntime-dev: Required for linking against system ONNX Runtime (dynamic)
 # - pkgconfig: Required to find system libraries
-# - clang, clang-dev: Required by some crates (e.g. rocksdb/bindgen)
-# - git: Required by cargo to fetch git dependencies
-RUN apk add --no-cache \
+# - clang, clang-dev: Required by some crates
+# - git: Required by cargo
+RUN apk update && apk add --no-cache \
     musl-dev \
     perl \
     make \
@@ -17,7 +21,7 @@ RUN apk add --no-cache \
     git \
     protobuf \
     openssl-dev \
-    openssl-libs-static \
+    onnxruntime-dev \
     pkgconfig \
     clang \
     clang-dev
@@ -25,23 +29,30 @@ RUN apk add --no-cache \
 WORKDIR /usr/src/synapse
 COPY . .
 
-# Set environment variables for static build
-# OPENSSL_NO_VENDOR=1: Use system OpenSSL instead of building from source
-# OPENSSL_STATIC=1: Link against static OpenSSL libraries
-# RUSTFLAGS="-C target-feature=-crt-static": Not needed - musl targets use static CRT by default
+# Set environment variables
+# OPENSSL_NO_VENDOR=1: Use system OpenSSL (dynamic)
+# ORT_STRATEGY=system: Use system ONNX Runtime (dynamic)
 ENV OPENSSL_NO_VENDOR=1
-ENV OPENSSL_STATIC=1
+ENV ORT_STRATEGY=system
 
 # Build the binary
-# Default target for rust:alpine is musl, so no --target needed for native arch
-# This works for both amd64 and arm64 (if multi-arch image is used)
+# Note: The resulting binary will be dynamically linked against musl, openssl, and onnxruntime
+# This is required because onnxruntime static binaries are not available for musl
 RUN cargo build --release -p synapse-core
 
 # Final stage
-FROM alpine:latest
+FROM alpine:edge
 
-# Install CA certificates for HTTPS support
-RUN apk add --no-cache ca-certificates
+# Add edge/community repository for onnxruntime
+RUN echo "http://dl-cdn.alpinelinux.org/alpine/edge/community" >> /etc/apk/repositories
+
+# Install runtime dependencies
+RUN apk add --no-cache \
+    libgcc \
+    libstdc++ \
+    openssl \
+    onnxruntime \
+    ca-certificates
 
 # Copy the binary from the builder stage
 COPY --from=builder /usr/src/synapse/target/release/synapse /usr/local/bin/synapse
