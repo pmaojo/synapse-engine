@@ -1,10 +1,10 @@
-FROM rust:1.88-alpine as builder
+FROM alpine:edge as builder
 
-# Add edge repositories for onnxruntime and its dependencies (abseil-cpp, protobuf)
-RUN echo "http://dl-cdn.alpinelinux.org/alpine/edge/main" >> /etc/apk/repositories && \
-    echo "http://dl-cdn.alpinelinux.org/alpine/edge/community" >> /etc/apk/repositories
+# Add edge community repository for onnxruntime, rust, and other dependencies
+RUN echo "http://dl-cdn.alpinelinux.org/alpine/edge/community" >> /etc/apk/repositories
 
 # Install build dependencies
+# - rust, cargo: Required for building Rust code
 # - musl-dev, gcc, g++, make: Standard build tools
 # - perl: Required for OpenSSL build scripts (if building from source)
 # - protobuf: Required for prost-build (protoc)
@@ -17,6 +17,8 @@ RUN echo "http://dl-cdn.alpinelinux.org/alpine/edge/main" >> /etc/apk/repositori
 # - clang-static: Required for bindgen on musl (dynamic loading not supported)
 # - git: Required by cargo
 RUN apk update && apk add --no-cache \
+    rust \
+    cargo \
     musl-dev \
     perl \
     make \
@@ -54,9 +56,8 @@ RUN cargo build --release -p synapse-core
 # Final stage
 FROM alpine:edge
 
-# Add edge repositories for runtime dependencies
-RUN echo "http://dl-cdn.alpinelinux.org/alpine/edge/main" >> /etc/apk/repositories && \
-    echo "http://dl-cdn.alpinelinux.org/alpine/edge/community" >> /etc/apk/repositories
+# Add edge community repository for runtime dependencies
+RUN echo "http://dl-cdn.alpinelinux.org/alpine/edge/community" >> /etc/apk/repositories
 
 # Install runtime dependencies
 RUN apk add --no-cache \
