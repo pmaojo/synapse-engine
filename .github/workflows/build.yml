@@ -20,14 +20,25 @@ jobs:
       - name: Build Release
         run: |
           source $HOME/.cargo/env
-          cargo build --release -p synapse-core
+          cargo build --release -p synapse-core 2>&1 | tee build.log
+          echo "=== Build log ==="
+          cat build.log
           
+      - name: Upload build log
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: build.log
+
       - name: Create artifact directory
+        if: success()
         run: |
           mkdir -p artifact
           cp target/release/synapse artifact/
           
       - name: Upload to Release
+        if: success()
         uses: softprops/action-gh-release@v1
         with:
           tag_name: latest
