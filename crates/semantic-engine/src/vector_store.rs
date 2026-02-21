@@ -2,6 +2,7 @@ use anyhow::{anyhow, Result};
 #[cfg(feature = "local-embeddings")]
 use fastembed::{EmbeddingModel, InitOptions, TextEmbedding};
 use hnsw::Hnsw;
+use rand::Rng;
 use rand_pcg::Pcg64;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -142,6 +143,7 @@ enum Embedder {
     #[cfg(feature = "local-embeddings")]
     Local(TextEmbedding),
     Remote(RemoteEmbedder),
+    Mock,
 }
 
 impl Embedder {
@@ -160,6 +162,15 @@ impl Embedder {
                 Ok(model.embed(texts, None)?)
             }
             Embedder::Remote(remote) => remote.embed_batch(texts).await,
+            Embedder::Mock => {
+                let mut rng = rand::thread_rng();
+                let mut results = Vec::with_capacity(texts.len());
+                for _ in 0..texts.len() {
+                    let embedding: Vec<f32> = (0..DEFAULT_DIMENSIONS).map(|_| rng.gen()).collect();
+                    results.push(embedding);
+                }
+                Ok(results)
+            }
         }
     }
 }
@@ -217,13 +228,18 @@ impl VectorStore {
 
         // Configure Embedder
         // Priority:
+        // 0. If env `MOCK_EMBEDDINGS` == "true" -> Mock
         // 1. If feature `local-embeddings` is OFF -> Remote
         // 2. If env `EMBEDDING_PROVIDER` == "remote" -> Remote
         // 3. Else -> Local (if enabled)
 
         let provider = std::env::var("EMBEDDING_PROVIDER").unwrap_or_else(|_| "local".to_string());
+        let mock_env = std::env::var("MOCK_EMBEDDINGS").unwrap_or_default();
 
-        let embedder = if provider == "remote" || !cfg!(feature = "local-embeddings") {
+        let embedder = if mock_env == "true" {
+             eprintln!("VectorStore: Using Mock Embeddings");
+             Embedder::Mock
+        } else if provider == "remote" || !cfg!(feature = "local-embeddings") {
              let url = std::env::var("EMBEDDING_API_URL").unwrap_or_else(|_| DEFAULT_REMOTE_API_URL.to_string());
              let model = std::env::var("EMBEDDING_MODEL").unwrap_or_else(|_| DEFAULT_REMOTE_MODEL.to_string());
              let key = std::env::var("EMBEDDING_API_KEY").ok();
