@@ -142,6 +142,7 @@ enum Embedder {
     #[cfg(feature = "local-embeddings")]
     Local(TextEmbedding),
     Remote(RemoteEmbedder),
+    Mock,
 }
 
 impl Embedder {
@@ -160,6 +161,15 @@ impl Embedder {
                 Ok(model.embed(texts, None)?)
             }
             Embedder::Remote(remote) => remote.embed_batch(texts).await,
+            Embedder::Mock => {
+                let mut rng = rand::rng();
+                let mut results = Vec::new();
+                for _ in 0..texts.len() {
+                    let embedding: Vec<f32> = (0..384).map(|_| rand::Rng::random(&mut rng)).collect();
+                    results.push(embedding);
+                }
+                Ok(results)
+            }
         }
     }
 }
@@ -222,8 +232,12 @@ impl VectorStore {
         // 3. Else -> Local (if enabled)
 
         let provider = std::env::var("EMBEDDING_PROVIDER").unwrap_or_else(|_| "local".to_string());
+        let use_mock = std::env::var("MOCK_EMBEDDINGS").unwrap_or_default() == "true";
 
-        let embedder = if provider == "remote" || !cfg!(feature = "local-embeddings") {
+        let embedder = if use_mock {
+            eprintln!("VectorStore: Using MOCK Embeddings");
+            Embedder::Mock
+        } else if provider == "remote" || !cfg!(feature = "local-embeddings") {
              let url = std::env::var("EMBEDDING_API_URL").unwrap_or_else(|_| DEFAULT_REMOTE_API_URL.to_string());
              let model = std::env::var("EMBEDDING_MODEL").unwrap_or_else(|_| DEFAULT_REMOTE_MODEL.to_string());
              let key = std::env::var("EMBEDDING_API_KEY").ok();
