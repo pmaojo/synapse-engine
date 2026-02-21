@@ -13,10 +13,6 @@ categories = ["database", "science"]
 name = "synapse"
 path = "src/main.rs"
 
-[[bin]]
-name = "vector_test"
-path = "tests/vector_load_test.rs"
-
 [features]
 default = ["rocksdb", "local-embeddings", "vendored-openssl"]
 rocksdb = ["oxigraph/rocksdb"]
