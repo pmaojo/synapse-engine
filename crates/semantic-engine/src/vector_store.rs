@@ -586,12 +586,12 @@ impl VectorStore {
         let top_candidates = &candidates[0..filter_size];
         
         // Stage 2: Fine Re-ranking (Full dimensions)
-        // Instead of HNSW, we do exact match on the filtered subset for maximum precision
+        // Use exact cosine similarity for maximum precision on filtered candidates
         let mut final_results: Vec<(usize, f32)> = top_candidates.iter()
             .map(|(idx, _coarse_sim)| {
                 let entry = &embeddings[*idx];
-                // Full cosine similarity
-                let fine_sim = fractal_similarity(&query_embedding, &entry.embedding, entry.embedding.len());
+                // Full cosine similarity for precise re-ranking
+                let fine_sim = cosine_similarity(&query_embedding, &entry.embedding);
                 (*idx, fine_sim)
             })
             .collect();
