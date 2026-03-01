@@ -32,7 +32,57 @@ impl space::Metric<Vec<f32>> for Euclidian {
     }
 }
 
+/// Computes cosine similarity of two vectors using only a prefix slice (e.g. 64d)
+/// Used for Stage 1 coarse filtering in two-stage search
+pub fn fractal_similarity(a: &[f32], b: &[f32], prefix_len: usize) -> f32 {
+    let len = a.len().min(b.len()).min(prefix_len);
+    if len == 0 {
+        return 0.0;
+    }
+    
+    let mut dot_product = 0.0;
+    let mut norm_a = 0.0;
+    let mut norm_b = 0.0;
+    
+    for i in 0..len {
+        dot_product += a[i] * b[i];
+        norm_a += a[i] * a[i];
+        norm_b += b[i] * b[i];
+    }
+    
+    if norm_a == 0.0 || norm_b == 0.0 {
+        return 0.0;
+    }
+    
+    dot_product / (norm_a.sqrt() * norm_b.sqrt())
+}
+
+/// Computes full cosine similarity between two vectors (all dimensions)
+/// Used for Stage 2 fine re-ranking in two-stage search
+pub fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
+    if a.is_empty() || b.is_empty() {
+        return 0.0;
+    }
+    
+    let mut dot_product = 0.0;
+    let mut norm_a = 0.0;
+    let mut norm_b = 0.0;
+    
+    for i in 0..a.len().min(b.len()) {
+        dot_product += a[i] * b[i];
+        norm_a += a[i] * a[i];
+        norm_b += b[i] * b[i];
+    }
+    
+    if norm_a == 0.0 || norm_b == 0.0 {
+        return 0.0;
+    }
+    
+    dot_product / (norm_a.sqrt() * norm_b.sqrt())
+}
+
 /// Persisted vector data
+
 #[derive(Serialize, Deserialize, Default)]
 struct VectorData {
     entries: Vec<VectorEntry>,
@@ -511,7 +561,69 @@ impl VectorStore {
         Ok(results)
     }
 
+    /// Two-Stage Fractal Search (V5)
+    pub async fn search_two_stage(&self, query: &str, k: usize, prefix_len: usize) -> Result<Vec<SearchResult>> {
+        let query_embedding = self.embed(query).await?;
+        
+        let _id_map = self.id_to_key.read().unwrap();
+        let metadata_map = self.key_to_metadata.read().unwrap();
+        let embeddings = self.embeddings.read().unwrap();
+        
+        // Stage 1: Coarse Filtering (using only prefix_len dimensions)
+        // We calculate cosine similarity for the prefix across all vectors (or a broad subset)
+        let mut candidates: Vec<(usize, f32)> = embeddings.iter().enumerate()
+            .map(|(idx, entry)| {
+                let sim = fractal_similarity(&query_embedding, &entry.embedding, prefix_len);
+                (idx, sim)
+            })
+            .collect();
+            
+        // Sort candidates by prefix similarity (descending)
+        candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        
+        // Take top K * 10 for fine re-ranking
+        let filter_size = (k * 10).min(candidates.len());
+        let top_candidates = &candidates[0..filter_size];
+        
+        // Stage 2: Fine Re-ranking (Full dimensions)
+        // Instead of HNSW, we do exact match on the filtered subset for maximum precision
+        let mut final_results: Vec<(usize, f32)> = top_candidates.iter()
+            .map(|(idx, _coarse_sim)| {
+                let entry = &embeddings[*idx];
+                // Full cosine similarity
+                let fine_sim = fractal_similarity(&query_embedding, &entry.embedding, entry.embedding.len());
+                (*idx, fine_sim)
+            })
+            .collect();
+            
+        final_results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        
+        let results: Vec<SearchResult> = final_results.into_iter().take(k).filter_map(|(idx, score)| {
+            let entry = &embeddings[idx];
+            // In a real system, we'd map idx to hnsw id, but here we can just use the key directly
+            let metadata = metadata_map
+                .get(&entry.key)
+                .cloned()
+                .unwrap_or(serde_json::Value::Null);
+            let uri = metadata
+                .get("uri")
+                .and_then(|v| v.as_str())
+                .unwrap_or(&entry.key)
+                .to_string();
+
+            Some(SearchResult {
+                key: entry.key.clone(),
+                score,
+                metadata,
+                uri,
+            })
+        }).collect();
+
+        Ok(results)
+    }
+
     pub fn get_key(&self, id: usize) -> Option<String> {
+
         self.id_to_key.read().unwrap().get(&id).cloned()
     }
 

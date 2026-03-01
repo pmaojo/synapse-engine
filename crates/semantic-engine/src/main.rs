@@ -39,7 +39,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
      \/ \/         \/     \/|__|       \/     \/
 "#
         );
-        let addr = "0.0.0.0:50051".parse()?;
+        let port = env::var("SYNAPSE_GRPC_PORT").unwrap_or_else(|_| "50051".to_string());
+        let addr_str = format!("0.0.0.0:{}", port);
+        let addr = addr_str.parse()?;
         println!("🚀 Synapse (ex-Grafoso) listening on {}", addr);
         println!("Storage Path: {}", storage_path);
 

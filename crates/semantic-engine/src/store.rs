@@ -316,12 +316,17 @@ impl SynapseStore {
         query: &str,
         vector_k: usize,
         graph_depth: u32,
+        prefix_len: Option<usize>,
     ) -> Result<Vec<(String, f32)>> {
         let mut results = Vec::new();
 
         // Step 1: Vector search
         if let Some(ref vs) = self.vector_store {
-            let vector_results = vs.search(query, vector_k).await?;
+            let vector_results = if let Some(plen) = prefix_len {
+                vs.search_two_stage(query, vector_k, plen).await?
+            } else {
+                vs.search(query, vector_k).await?
+            };
 
             for result in vector_results {
                 // Use the URI from metadata/result (which maps to Subject URI for triples)

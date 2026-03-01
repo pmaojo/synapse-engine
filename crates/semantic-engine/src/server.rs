@@ -545,7 +545,9 @@ impl SemanticEngine for MySemanticEngine {
 
         let store = self.get_store(namespace)?;
 
-        match store.hybrid_search(&req.query, req.limit as usize, 0).await {
+        let prefix = if req.prefix_len > 0 { Some(req.prefix_len as usize) } else { None };
+
+        match store.hybrid_search(&req.query, req.limit as usize, 0, prefix).await {
             Ok(results) => {
                 let grpc_results = results
                     .into_iter()
@@ -733,10 +735,11 @@ impl SemanticEngine for MySemanticEngine {
 
         let vector_k = req.vector_k as usize;
         let graph_depth = req.graph_depth;
+        let prefix = if req.prefix_len > 0 { Some(req.prefix_len as usize) } else { None };
 
         let results = match SearchMode::try_from(req.mode) {
             Ok(SearchMode::VectorOnly) | Ok(SearchMode::Hybrid) => store
-                .hybrid_search(&req.query, vector_k, graph_depth)
+                .hybrid_search(&req.query, vector_k, graph_depth, prefix)
                 .await
                 .map_err(|e| Status::internal(format!("Hybrid search failed: {}", e)))?,
             _ => vec![],

@@ -698,6 +698,7 @@ impl McpStdioServer {
             graph_depth,
             mode: SearchMode::Hybrid as i32,
             limit,
+            prefix_len: 0,
         });
 
         match self.engine.hybrid_search(req).await {
