@@ -19,6 +19,7 @@ env/
 **/data/*.db
 **/data/graphs/**/*
 !**/data/graphs/.gitkeep
+**/data/graphs/default/LOG
 **/data/sessions/
 **/data/*.jsonl
 .fastembed_cache/
