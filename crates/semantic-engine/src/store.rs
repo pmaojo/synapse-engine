@@ -1,5 +1,4 @@
 use crate::persistence::{load_bincode, save_bincode};
-use crate::vector_store::VectorStore;
 use anyhow::Result;
 use oxigraph::model::*;
 use oxigraph::store::Store;
@@ -7,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::RwLock;
 use uuid::Uuid;
 
 const DEFAULT_MAPPING_SAVE_THRESHOLD: usize = 1000;
@@ -41,8 +40,6 @@ pub struct SynapseStore {
     pub id_to_uri: RwLock<HashMap<u32, String>>,
     pub uri_to_id: RwLock<HashMap<String, u32>>,
     pub next_id: std::sync::atomic::AtomicU32,
-    // Vector store for hybrid search
-    pub vector_store: Option<Arc<VectorStore>>,
     // Persistence state
     dirty_count: AtomicUsize,
     save_threshold: usize,
@@ -53,21 +50,9 @@ impl SynapseStore {
         let path = PathBuf::from(storage_path).join(namespace);
         std::fs::create_dir_all(&path)?;
 
-        #[cfg(feature = "rocksdb")]
+        // Oxigraph is configured with rocksdb feature in Cargo.toml
+        // so Store::open utilizes rocksdb directly for persistence.
         let store = Store::open(&path)?;
-
-        #[cfg(not(feature = "rocksdb"))]
-        let store = {
-            let s = Store::new()?;
-            let graph_path = path.join("graph.nq");
-            if graph_path.exists() {
-                let file = std::fs::File::open(&graph_path)?;
-                let reader = std::io::BufReader::new(file);
-                s.load_from_reader(oxigraph::io::RdfFormat::NQuads, reader)?;
-                eprintln!("Loaded in-memory graph from {}", graph_path.display());
-            }
-            s
-        };
 
         // Load persisted URI mappings if they exist
         let mappings_path_bin = path.join("uri_mappings.bin");
@@ -94,15 +79,6 @@ impl SynapseStore {
             (HashMap::new(), HashMap::new(), 1)
         };
 
-        // Initialize vector store (optional, can fail gracefully)
-        let vector_store = match VectorStore::new(namespace) {
-            Ok(vs) => Some(Arc::new(vs)),
-            Err(e) => {
-                eprintln!("WARNING: Failed to initialize vector store for namespace '{}': {}", namespace, e);
-                None
-            }
-        };
-
         Ok(Self {
             store,
             namespace: namespace.to_string(),
@@ -110,7 +86,6 @@ impl SynapseStore {
             id_to_uri: RwLock::new(id_to_uri),
             uri_to_id: RwLock::new(uri_to_id),
             next_id: std::sync::atomic::AtomicU32::new(next_id),
-            vector_store,
             dirty_count: AtomicUsize::new(0),
             save_threshold: DEFAULT_MAPPING_SAVE_THRESHOLD,
         })
@@ -140,21 +115,9 @@ impl SynapseStore {
     /// Force save all data to disk
     pub fn flush(&self) -> Result<()> {
         self.save_mappings()?;
-        if let Some(ref vs) = self.vector_store {
-            vs.flush()?;
-        }
 
-        #[cfg(not(feature = "rocksdb"))]
-        {
-            let graph_path = self.storage_path.join("graph.nq");
-            // Atomic write pattern: write to tmp, then rename
-            let tmp_path = self.storage_path.join("graph.nq.tmp");
-            let file = std::fs::File::create(&tmp_path)?;
-            let writer = std::io::BufWriter::new(file);
-            self.store.dump_to_writer(oxigraph::io::RdfFormat::NQuads, writer)?;
-            std::fs::rename(tmp_path, graph_path)?;
-            eprintln!("Persisted in-memory graph to disk.");
-        }
+        // Oxigraph rocksdb auto-flushes on close, but we can call optimize if needed
+        // For now, save_mappings is the only thing we need to explicitly flush manually
 
         Ok(())
     }
@@ -198,6 +161,7 @@ impl SynapseStore {
 
     pub async fn ingest_triples(&self, triples: Vec<IngestTriple>) -> Result<(u32, u32)> {
         let mut added = 0;
+        let mut affected_entities = std::collections::HashSet::new();
 
         // Group by provenance to optimize batch insertion into named graphs
         let mut batches: HashMap<Option<Provenance>, Vec<(String, String, String)>> =
@@ -277,82 +241,92 @@ impl SynapseStore {
 
                 let quad = Quad::new(subject, predicate, object, graph_name.clone());
                 let inserted = self.store.insert(&quad)?;
-                
-                // Also index in vector store if available
-                if let Some(ref vs) = self.vector_store {
-                    // We check if it's already in the vector store by key
-                    let key = format!("{}|{}|{}", subject_uri, predicate_uri, object_key_str);
-                    if vs.get_id(&key).is_none() {
-                        // Create searchable content from triple
-                        let content = format!("{} {} {}", s, p, o);
-                        // Pass metadata including the subject URI for graph expansion later
-                        let metadata = serde_json::json!({
-                            "uri": subject_uri,
-                            "predicate": predicate_uri,
-                            "object": object_key_str,
-                            "type": "triple"
-                        });
-
-                        if let Err(e) = vs.add(&key, &content, metadata).await {
-                            // If we just inserted it into the graph but vector failed, 
-                            // we technically have an inconsistency, but for now we just log.
-                            eprintln!("Vector store insertion failed for {}: {}", key, e);
-                        }
-                    }
-                }
 
                 if inserted {
                     added += 1;
+                    affected_entities.insert(subject_uri);
                 }
             }
         }
+
+        // Trigger Graph -> MD synchronization for affected entities
+        self.sync_entities_to_markdown(&affected_entities);
 
         Ok((added, 0))
     }
 
-    /// Hybrid search: vector similarity + graph expansion
-    pub async fn hybrid_search(
-        &self,
-        query: &str,
-        vector_k: usize,
-        graph_depth: u32,
-        prefix_len: Option<usize>,
-    ) -> Result<Vec<(String, f32)>> {
-        let mut results = Vec::new();
+    /// Fetches derived properties for given entities and syncs them back to their origin Markdown files
+    pub fn sync_entities_to_markdown(&self, entities: &std::collections::HashSet<String>) {
+        use crate::md_sync::writer::MarkdownWriter;
 
-        // Step 1: Vector search
-        if let Some(ref vs) = self.vector_store {
-            let vector_results = if let Some(plen) = prefix_len {
-                vs.search_two_stage(query, vector_k, plen).await?
-            } else {
-                vs.search(query, vector_k).await?
-            };
+        let p_derived = NamedNode::new("http://www.w3.org/ns/prov#wasDerivedFrom").unwrap();
 
-            for result in vector_results {
-                // Use the URI from metadata/result (which maps to Subject URI for triples)
-                let uri = result.uri.clone();
-                results.push((uri.clone(), result.score));
+        for entity_uri in entities {
+            // Find if this entity came from a Markdown file
+            let subject = NamedNodeRef::new(entity_uri).ok();
+            if let Some(s) = subject {
+                let mut origin_file = None;
+                for q in self.store.quads_for_pattern(Some(s.into()), Some(p_derived.as_ref()), None, None).flatten() {
+                    if let Term::NamedNode(file_node) = q.object {
+                        let path_str = file_node.as_str().trim_start_matches("file://");
+                        origin_file = Some(path_str.to_string());
+                        break;
+                    }
+                }
 
-                // Step 2: Graph expansion (if depth > 0)
-                if graph_depth > 0 {
-                    let expanded = self.expand_graph(&uri, graph_depth)?;
-                    for expanded_uri in expanded {
-                        // Add with slightly lower score
-                        results.push((expanded_uri, result.score * 0.8));
+                if let Some(file_path) = origin_file {
+                    if std::path::Path::new(&file_path).exists() {
+                        // Gather inferences/backlinks (where this entity is the object)
+                        let mut inferences = Vec::new();
+                        for q in self.store.quads_for_pattern(None, None, Some(s.into()), None).flatten() {
+                            if q.predicate.as_ref() != p_derived.as_ref() {
+                                if let Subject::NamedNode(subj) = q.subject {
+                                    inferences.push((
+                                        q.predicate.as_str().to_string(),
+                                        subj.as_str().to_string(),
+                                    ));
+                                }
+                            }
+                        }
+
+                        if !inferences.is_empty() {
+                            if let Err(e) = MarkdownWriter::write_inferences(&file_path, &inferences) {
+                                eprintln!("Warning: Failed to sync markdown backlinks {}: {}", file_path, e);
+                            }
+                        }
+
+                        // Gather direct properties to update frontmatter
+                        let mut properties = std::collections::HashMap::new();
+                        let p_type = NamedNode::new("http://www.w3.org/1999/02/22-rdf-syntax-ns#type").unwrap();
+
+                        for q in self.store.quads_for_pattern(Some(s.into()), None, None, None).flatten() {
+                            let pred = q.predicate.as_str();
+                            if pred == p_type.as_str() {
+                                if let Term::NamedNode(obj) = q.object {
+                                    if let Some(t) = obj.as_str().strip_prefix("urn:synapse:type:") {
+                                        properties.insert("type".to_string(), t.to_string());
+                                    }
+                                }
+                            } else if let Some(prop_name) = pred.strip_prefix("urn:synapse:prop:") {
+                                if let Term::Literal(lit) = q.object {
+                                    properties.insert(prop_name.to_string(), lit.value().to_string());
+                                }
+                            }
+                        }
+
+                        if !properties.is_empty() {
+                            if let Err(e) = MarkdownWriter::update_frontmatter(&file_path, properties) {
+                                eprintln!("Warning: Failed to update markdown frontmatter {}: {}", file_path, e);
+                            }
+                        }
                     }
                 }
             }
         }
-
-        // Remove duplicates and sort by score
-        results.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap());
-        results.dedup_by(|a, b| a.0 == b.0);
-
-        Ok(results)
     }
 
     /// Expand graph from a starting URI
-    fn expand_graph(&self, start_uri: &str, depth: u32) -> Result<Vec<String>> {
+    pub fn expand_graph(&self, start_uri: &str, depth: u32) -> Result<Vec<String>> {
         let mut expanded = Vec::new();
 
         if depth == 0 {

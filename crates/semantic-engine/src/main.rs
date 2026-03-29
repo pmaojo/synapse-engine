@@ -1,33 +1,21 @@
 use std::env;
 use std::sync::Arc;
-use synapse_core::server::{
-    proto::semantic_engine_server::SemanticEngineServer, run_mcp_stdio, MySemanticEngine,
-};
-use tonic::transport::Server;
+use synapse_core::mcp::server::start_mcp_server;
+use synapse_core::mcp::stdio::run_stdio_mcp_server;
+use synapse_core::store::SynapseStore;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<String> = env::args().collect();
-    let is_mcp = args.contains(&"--mcp".to_string());
+    let is_stdio = args.contains(&"--stdio".to_string());
 
-    // Get storage path from env or default
     let storage_path = env::var("GRAPH_STORAGE_PATH").unwrap_or_else(|_| "data/graphs".to_string());
 
-    let engine = MySemanticEngine::new(&storage_path);
+    let store = Arc::new(SynapseStore::open("default", &storage_path)?);
 
-    // Ensure 'core' scenario is installed on startup (backgrounded for MCP performance)
-    let engine_init = engine.clone();
-    tokio::spawn(async move {
-        match engine_init.install_scenario("core", "default").await {
-            Ok(msg) => eprintln!("{}", msg),
-            Err(e) => eprintln!("Failed to load core scenario: {}", e),
-        }
-    });
-
-    if is_mcp {
-        // MCP mode: no stdout messages, only JSON-RPC
-        eprintln!("Synapse-MCP starting (stdio mode)...");
-        run_mcp_stdio(Arc::new(engine)).await?;
+    if is_stdio {
+        eprintln!("Synapse-MCP starting in stdio mode...");
+        run_stdio_mcp_server(store).await;
     } else {
         println!(
             r#"
@@ -39,26 +27,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
      \/ \/         \/     \/|__|       \/     \/
 "#
         );
-        let port = env::var("SYNAPSE_GRPC_PORT").unwrap_or_else(|_| "50051".to_string());
-        let addr_str = format!("0.0.0.0:{}", port);
-        let addr = addr_str.parse()?;
-        println!("🚀 Synapse (ex-Grafoso) listening on {}", addr);
+        let port = env::var("SYNAPSE_MCP_PORT").unwrap_or_else(|_| "3000".to_string()).parse()?;
+        println!("🚀 Synapse Engine starting (Pure Symbolic Mode, MCP Ext-Apps ready)");
         println!("Storage Path: {}", storage_path);
 
-        let engine_clone = engine.clone();
-
-        Server::builder()
-            .add_service(SemanticEngineServer::with_interceptor(
-                engine,
-                synapse_core::server::auth_interceptor,
-            ))
-            .serve_with_shutdown(addr, async move {
-                if tokio::signal::ctrl_c().await.is_ok() {
-                    println!("\nShutting down Synapse...");
-                }
-                engine_clone.shutdown().await;
-            })
-            .await?;
+        start_mcp_server(port, store).await?;
     }
 
     Ok(())

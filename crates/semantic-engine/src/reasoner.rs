@@ -20,12 +20,14 @@ impl SynapseReasoner {
 
     /// Apply reasoning to a store and return inferred triples (without inserting)
     pub fn apply(&self, store: &Store) -> Result<Vec<(String, String, String)>> {
-        let mut inferred = Vec::new();
+        let mut inferred = std::collections::HashSet::new();
+        if self.strategy == ReasoningStrategy::None {
+            return Ok(inferred.into_iter().collect());
+        }
 
-        match self.strategy {
-            ReasoningStrategy::None => {}
-            ReasoningStrategy::RDFS => {
-                // RDFS: SubClassOf Transitivity
+        // --- RDFS Rules ---
+        if self.strategy == ReasoningStrategy::RDFS || self.strategy == ReasoningStrategy::OWLRL {
+            // RDFS: SubClassOf Transitivity
                 // If A subClassOf B, and B subClassOf C -> A subClassOf C
                 let subclass_prop =
                     NamedNode::new("http://www.w3.org/2000/01/rdf-schema#subClassOf")?;
@@ -46,7 +48,7 @@ impl SynapseReasoner {
                                 .flatten()
                             {
                                 if let Term::NamedNode(c) = q2.object {
-                                    inferred.push((
+                                    inferred.insert((
                                         a.as_str().to_string(),
                                         subclass_prop.as_str().to_string(),
                                         c.as_str().to_string(),
@@ -56,9 +58,11 @@ impl SynapseReasoner {
                         }
                     }
                 }
-            }
-            ReasoningStrategy::OWLRL => {
-                // OWL-RL: TransitiveProperty
+        }
+
+        // --- OWL-RL Rules ---
+        if self.strategy == ReasoningStrategy::OWLRL {
+            // OWL-RL: TransitiveProperty
                 // If p is TransitiveProperty, and x p y, y p z -> x p z
                 let type_prop = NamedNode::new("http://www.w3.org/1999/02/22-rdf-syntax-ns#type")?;
                 let transitive_class =
@@ -95,11 +99,48 @@ impl SynapseReasoner {
                                         .flatten()
                                     {
                                         if let Term::NamedNode(z) = yz_quad.object {
-                                            inferred.push((
+                                            inferred.insert((
                                                 x.as_str().to_string(),
                                                 p_node.as_str().to_string(),
                                                 z.as_str().to_string(),
                                             ));
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // OWL-RL: propertyChainAxiom (A property chain p1 o p2 -> p)
+                // In RDF/XML, this is represented as a list. For simplicity in memory graphs,
+                // we'll support a direct binary chain representation:
+                // <p> <urn:synapse:chainFirst> <p1> .
+                // <p> <urn:synapse:chainSecond> <p2> .
+                let chain_first = NamedNode::new("urn:synapse:chainFirst")?;
+                let chain_second = NamedNode::new("urn:synapse:chainSecond")?;
+
+                for q in store.quads_for_pattern(None, Some(chain_first.as_ref()), None, None).flatten() {
+                    if let Subject::NamedNode(p) = q.subject {
+                        if let Term::NamedNode(p1) = q.object {
+                            for q2 in store.quads_for_pattern(Some(p.as_ref().into()), Some(chain_second.as_ref()), None, None).flatten() {
+                                if let Term::NamedNode(p2) = q2.object {
+                                    // p1 o p2 -> p
+                                    // Find x p1 y
+                                    for xy in store.quads_for_pattern(None, Some(p1.as_ref()), None, None).flatten() {
+                                        if let Subject::NamedNode(x) = xy.subject {
+                                            if let Term::NamedNode(y) = xy.object {
+                                                // Find y p2 z
+                                                for yz in store.quads_for_pattern(Some(y.as_ref().into()), Some(p2.as_ref()), None, None).flatten() {
+                                                    if let Term::NamedNode(z) = yz.object {
+                                                        inferred.insert((
+                                                            x.as_str().to_string(),
+                                                            p.as_str().to_string(),
+                                                            z.as_str().to_string(),
+                                                        ));
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -132,7 +173,7 @@ impl SynapseReasoner {
                             // Infer: y p x
                             if let Subject::NamedNode(s_node) = e.subject {
                                 if let Term::NamedNode(obj_node) = e.object {
-                                    inferred.push((
+                                    inferred.insert((
                                         obj_node.as_str().to_string(),
                                         p_node.as_str().to_string(),
                                         s_node.as_str().to_string(),
@@ -161,7 +202,7 @@ impl SynapseReasoner {
                             {
                                 if let Subject::NamedNode(x) = e.subject {
                                     if let Term::NamedNode(y) = e.object {
-                                        inferred.push((
+                                        inferred.insert((
                                             y.as_str().to_string(),
                                             p2_node.as_str().to_string(),
                                             x.as_str().to_string(),
@@ -172,18 +213,25 @@ impl SynapseReasoner {
                         }
                     }
                 }
-            }
         }
 
-        Ok(inferred)
+        Ok(inferred.into_iter().collect())
     }
 
     /// Apply reasoning and persist inferred triples
     pub fn materialize(&self, store: &Store) -> Result<usize> {
         let mut total_inferred = 0;
+        let mut iterations = 0;
+        const MAX_ITERATIONS: usize = 100;
 
         // Fixed-point iteration loop
         loop {
+            if iterations >= MAX_ITERATIONS {
+                eprintln!("SynapseReasoner: Reached MAX_ITERATIONS ({}) during materialization. Halting to prevent infinite loops.", MAX_ITERATIONS);
+                break;
+            }
+            iterations += 1;
+
             let inferred = self.apply(store)?;
             if inferred.is_empty() {
                 break;
