@@ -1,26 +1,15 @@
 # Contributing to Synapse 🧠⛓️
 
-Thank you for your interest in contributing to Synapse! We are building the memory layer for the next generation of AI agents, and your help is invaluable.
+Thank you for your interest in contributing to Synapse! We are building the symbolic memory layer for the next generation of AI agents, and your help is invaluable.
 
 ## 🏗️ Development Setup
 
-Synapse is a hybrid project (Rust + Python). You will need:
+Synapse is a purely symbolic Rust project. You will need:
 - **Rust** (stable)
-- **Python** (3.10+)
-- **Protoc** (for gRPC code generation)
 
-### 1. Backend (Rust)
+### Building the Backend (Rust)
 ```bash
-cd crates/semantic-engine
-cargo build
-```
-
-### 2. Frontend & SDK (Python)
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-pip install -e ./python-sdk
+cargo build --release
 ```
 
 ## 🛠️ Contribution Workflow
@@ -29,14 +18,13 @@ pip install -e ./python-sdk
 2.  **Make your changes**. If you're adding a new feature, please include tests.
 3.  **Run the checks**:
     *   `cargo fmt` and `cargo clippy` for Rust code.
-    *   `pytest` for Python code.
+    *   `cargo test`
 4.  **Submit a Pull Request** with a clear description of the changes and the problem they solve.
 
 ## 🧪 Testing Guidelines
 
-We use a combination of unit tests and E2E tests.
-- **Rust tests**: `cargo test` in the relevant crate.
-- **Python tests**: `pytest tests/` (Ensure the Rust server is running for integration tests).
+We use Rust unit tests and integration tests.
+- **Rust tests**: `cargo test` in the root workspace or relevant crate.
 
 ## 📜 Code of Conduct
 
