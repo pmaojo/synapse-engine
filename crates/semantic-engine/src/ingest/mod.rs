@@ -1,6 +1,6 @@
 pub mod extractor;
 pub mod ontology;
-pub mod processor;
+
 use crate::store::{IngestTriple, SynapseStore};
 use anyhow::Result;
 use std::path::Path;
@@ -22,7 +22,7 @@ impl IngestionEngine {
             .to_lowercase();
 
         match extension.as_str() {
-            "md" | "markdown" => self.ingest_markdown(path, namespace).await,
+            "md" | "markdown" => self.ingest_markdown(path).await,
             "csv" => self.ingest_csv(path, namespace).await,
             "owl" | "ttl" | "rdf" | "xml" => {
                 let count = ontology::OntologyLoader::load_file(&self.store, path).await?;
@@ -32,44 +32,21 @@ impl IngestionEngine {
         }
     }
 
-    async fn ingest_markdown(&self, path: &Path, namespace: &str) -> Result<u32> {
+    async fn ingest_markdown(&self, path: &Path) -> Result<u32> {
+        use crate::md_sync::parser::MarkdownDocument;
         let content = std::fs::read_to_string(path)?;
-        let triples = extractor::extract_metadata(&content, path.to_str().unwrap());
 
-        let ingest_triples: Vec<IngestTriple> = triples
-            .into_iter()
-            .map(|t| IngestTriple {
-                subject: t.subject,
-                predicate: t.predicate,
-                object: t.object,
-                provenance: Some(crate::store::Provenance {
-                    source: path.to_string_lossy().to_string(),
-                    timestamp: chrono::Utc::now().to_rfc3339(),
-                    method: "markdown_extractor".to_string(),
-                }),
-            })
-            .collect();
+        let doc = MarkdownDocument::parse(path, &content)?;
+        let quads = doc.to_quads();
+        let mut added = 0;
 
-        let (added, _) = self.store.ingest_triples(ingest_triples).await?;
-
-        // Also ingest content into vector store for RAG
-        if let Some(ref vs) = self.store.vector_store {
-            let processor = super::processor::TextProcessor::new();
-            let chunks = processor.chunk_text(&content, 1000, 150);
-            for (i, chunk) in chunks.iter().enumerate() {
-                let chunk_uri = format!("{}#chunk-{}", path.to_string_lossy(), i);
-                let metadata = serde_json::json!({
-                    "uri": path.to_string_lossy(),
-                    "chunk_uri": chunk_uri,
-                    "type": "markdown_chunk",
-                    "namespace": namespace
-                });
-                if let Err(e) = vs.add(&chunk_uri, chunk, metadata).await {
-                    eprintln!("Failed to index chunk {}: {}", i, e);
-                }
+        for quad in quads {
+            if self.store.store.insert(&quad)? {
+                added += 1;
             }
         }
 
+        // El motor lógic se actualizará durante la fase 4 (SynapseReasoner)
         Ok(added)
     }
 

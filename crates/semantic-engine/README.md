@@ -6,9 +6,9 @@
 [![Documentation](https://docs.rs/synapse-core/badge.svg)](https://docs.rs/synapse-core)
 [![License](https://img.shields.io/crates/l/synapse-core.svg)](https://github.com/pmaojo/synapse-engine/blob/main/LICENSE)
 
-**A high-performance neuro-symbolic semantic engine designed for agentic AI.**
+**The Symbolic AGI Memory Core (Pure Graph, No Vectors)**
 
-[Features](#-features) • [Installation](#-installation) • [Usage](#-usage) • [API Reference](#-api-reference) • [Architecture](#-architecture)
+[Features](#-features) • [Installation](#-installation) • [Architecture](#-architecture) • [MCP Ext-Apps UI](#-mcp-ext-apps-ui)
 
 </div>
 
@@ -16,355 +16,103 @@
 
 ## 📖 Overview
 
-**Synapse Core** provides the foundational semantic memory layer for AI agents. It combines the structured precision of **Knowledge Graphs** (using [Oxigraph](https://github.com/oxigraph/oxigraph)) with **RDF/SPARQL** standards, allowing agents to reason about data, maintain long-term context, and query knowledge using industry-standard semantic web technologies.
+**Synapse Core** provides the foundational semantic memory layer for Autonomous AI agents.
 
-It is designed to work seamlessly with **OpenClaw** and other agentic frameworks via the **Model Context Protocol (MCP)** or as a standalone **gRPC service**.
+Following a radical architectural pivot, Synapse Core has completely **eradicated vector embeddings and probabilistic machine learning**. The true power of an AGI's memory lies in its symbolic engine: deterministic, logical, and fully explainable.
+
+Powered by [Oxigraph](https://github.com/oxigraph/oxigraph) and an optimized OWL-RL Reasoner in pure Rust, it provides:
+1. **Absolute Logical Truths** instead of fuzzy RAG similarity.
+2. **Bidirectional Markdown Synchronization**, making the semantic graph the invisible nervous system bridging raw text files and agentic memory.
+3. **Model Context Protocol (MCP)** exclusively, built for the next generation of LLMs.
 
 ## 🚀 Features
 
-- **RDF Triple Store**: Built on Oxigraph for standards-compliant RDF storage and querying
-- **SPARQL Support**: Full SPARQL 1.1 query language support for complex graph queries
-- **Multi-Namespace Architecture**: Isolated knowledge bases for different contexts (work, personal, projects)
-- **Dual Protocol Support**:
-  - **gRPC API** for high-performance programmatic access
-  - **MCP Server** for seamless LLM agent integration
-- **OWL Reasoning**: Built-in support for OWL 2 RL reasoning via `reasonable` crate
-- **Hybrid Search**: Combines vector similarity with graph traversal (using local HNSW index)
-- **HuggingFace API Integration**: High-performance embeddings without local GPU/CPU heavy lifting
-- **High Performance**: Written in Rust with async I/O and efficient HNSW indexing
-- **Persistent Storage**: Automatic persistence with namespace-specific storage paths
-- **Granular Security**: Token-based authorization for Read, Write, Delete, and Reason operations.
-- **Robust MCP**: Strict JSON Schema validation for all Model Context Protocol tool calls.
+- **Pure Symbolic Graph**: 100% deterministic memory. No `onnxruntime`, no RAG vector stores.
+- **Bidirectional Markdown Sync (MD <-> Graph)**:
+  - **Read**: Extracts entities, relationships (`[[wikilinks]]`), and `YAML Frontmatter`. Hashes blocks for precise `prov:wasDerivedFrom` provenance.
+  - **Write**: The reasoner automatically injects inferred logical truths back into the Markdown files as "Backlinks" and updates the Frontmatter without destroying human-readable text.
+- **Fixed-Point OWL-RL Reasoner**: Calculates the transitive closure of the graph (Symmetry, Transitivity, Property Chains) looping in-memory until no new implicit knowledge can be derived.
+- **MCP Ext-Apps UI Support**: Exposes interactive HTML/JS graph visualizations (e.g., node neighborhoods via D3) using the `ui://` protocol for clients like Claude Desktop.
+- **Dual Transport MCP Server**:
+  - STDIO transport for local agents (`--stdio`)
+  - HTTP/SSE (Server-Sent Events) for distributed Ext-Apps.
 
 ## 📦 Installation
 
-### As a Rust Library
-
-Add to your `Cargo.toml`:
-
-```toml
-[dependencies]
-synapse-core = "0.8.4"
-```
-
-### As a Binary
-
-Install the CLI tool:
+Install the CLI tool directly from source:
 
 ```bash
-cargo install synapse-core
+cargo install --path crates/semantic-engine
 ```
 
-### For OpenClaw
+## 🛠️ Integration Guide for Agents (MCP)
 
-One-click install as an MCP server:
+Synapse is designed to be invisible to humans but fully controllable by Autonomous Agents via the **Model Context Protocol (MCP)**.
 
+### 1. Starting the Server
+
+**Local Agent Mode (STDIO):**
+Used by local CLI agents or Claude Desktop.
 ```bash
-npx skills install pmaojo/synapse-engine
+synapse --stdio
 ```
 
-## 🛠️ Usage
-
-### 1. Standalone gRPC Server
-
-Run Synapse as a high-performance gRPC server:
-
+**Ext-Apps Mode (HTTP/SSE):**
+Used to expose the engine to web interfaces or network-distributed agents.
 ```bash
-# Start the server (default: localhost:50051)
-synapse
-
-# With custom storage path
-GRAPH_STORAGE_PATH=/path/to/data synapse
+SYNAPSE_MCP_PORT=3000 synapse
 ```
 
-The gRPC server exposes 7 RPC methods for semantic operations (see [API Reference](#-api-reference)).
+### 2. Available MCP Tools
 
-### 2. Model Context Protocol (MCP) Server
+Agents can discover and use the following tools:
 
-Run in MCP mode for integration with LLM agents:
+- `sparql_query`: Execute raw SPARQL 1.1 queries to traverse complex logical paths in the memory.
+- `get_entity_neighborhood`: Given an entity URI, returns the deterministic BFS expansion of its subgraph. It also returns an embedded `ui://` resource for the host to render a visual graph!
+- `index_markdown_directory`: Commands the engine to crawl a folder, parse all `.md` files, extract their semantic links, and persist them into the graph.
 
-```bash
-synapse --mcp
-```
+### 3. Using the Markdown Sync
 
-This exposes 3 MCP tools via JSON-RPC over stdio:
+Instead of black-box RAG, agents dump their knowledge into human-readable `.md` files.
 
-- `query_graph` - Retrieve all triples from a namespace
-- `ingest_triple` - Add a new triple to the knowledge graph
-- `query_sparql` - Execute SPARQL queries
-
-### 3. Rust Library Integration
-
-Embed the engine directly into your application:
-
-```rust
-use synapse_core::server::MySemanticEngine;
-use synapse_core::server::semantic_engine::*;
-use tonic::Request;
-
-#[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // Initialize the engine
-    let engine = MySemanticEngine::new("data/my_graph");
-
-    // Ingest triples
-    let triple = Triple {
-        subject: "Alice".to_string(),
-        predicate: "knows".to_string(),
-        object: "Bob".to_string(),
-        provenance: None,
-    };
-
-    let request = IngestRequest {
-        triples: vec![triple],
-        namespace: "social".to_string(),
-    };
-
-    let response = engine.ingest_triples(Request::new(request)).await?;
-    println!("Added {} triples", response.into_inner().nodes_added);
-
-    Ok(())
-}
-```
-
-### 4. Hybrid Search
-
-Retrieve entities matching both semantic similarity (vector) and structural relationship (graph):
-
-```rust
-use synapse_core::server::proto::{HybridSearchRequest, SearchMode};
-
-let request = HybridSearchRequest {
-    query: "What are the latest findings on neuro-symbolic AI?".to_string(),
-    namespace: "research".to_string(),
-    vector_k: 10,       // Top-K vectors
-    graph_depth: 2,    // Expand graph 2 levels deep from results
-    mode: SearchMode::Hybrid as i32,
-    limit: 5,
-};
-
-let response = engine.hybrid_search(Request::new(request)).await?;
-```
-
-### 5. Automated Reasoning
-
-Apply OWL-RL or RDFS reasoning to derive implicit knowledge:
-
-```rust
-use synapse_core::server::proto::{ReasoningRequest, ReasoningStrategy};
-
-let request = ReasoningRequest {
-    namespace: "ontology".to_string(),
-    strategy: ReasoningStrategy::Owlrl as i32,
-    materialize: true, // Save inferred triples to storage
-};
-
-let response = engine.apply_reasoning(Request::new(request)).await?;
-println!("Inferred {} new facts", response.into_inner().triples_inferred);
-```
-
-### 6. SPARQL Queries
-
-Query your knowledge graph using SPARQL:
-
-```rust
-use synapse_core::server::semantic_engine::SparqlRequest;
-
-let sparql_query = r#"
-    SELECT ?subject ?predicate ?object
-    WHERE {
-        ?subject ?predicate ?object .
-    }
-    LIMIT 10
-"#;
-
-let request = SparqlRequest {
-    query: sparql_query.to_string(),
-    namespace: "default".to_string(),
-};
-
-let response = engine.query_sparql(Request::new(request)).await?;
-println!("Results: {}", response.into_inner().results_json);
-```
-
-### 7. Multi-Namespace Usage
-
-Isolate different knowledge domains:
-
-```rust
-// Work-related knowledge
-engine.ingest_triples(Request::new(IngestRequest {
-    triples: work_triples,
-    namespace: "work".to_string(),
-})).await?;
-
-// Personal knowledge
-engine.ingest_triples(Request::new(IngestRequest {
-    triples: personal_triples,
-    namespace: "personal".to_string(),
-})).await?;
-
-// Query specific namespace
-let work_data = engine.get_all_triples(Request::new(EmptyRequest {
-    namespace: "work".to_string(),
-})).await?;
-```
-
-## 📚 API Reference
-
-### gRPC API
-
-The `SemanticEngine` service provides the following RPC methods:
-
-| Method                | Request               | Response            | Description                            |
-| --------------------- | --------------------- | ------------------- | -------------------------------------- |
-| `IngestTriples`       | `IngestRequest`       | `IngestResponse`    | Add RDF triples to the graph           |
-| `GetNeighbors`        | `NodeRequest`         | `NeighborResponse`  | Graph traversal (supports edge & type filters) |
-| `Search`              | `SearchRequest`       | `SearchResponse`    | Legacy vector search                   |
-| `ResolveId`           | `ResolveRequest`      | `ResolveResponse`   | Resolve URI string to internal node ID |
-| `GetAllTriples`       | `EmptyRequest`        | `TriplesResponse`   | Retrieve all triples from a namespace  |
-| `QuerySparql`         | `SparqlRequest`       | `SparqlResponse`    | Execute SPARQL 1.1 queries             |
-| `DeleteNamespaceData` | `EmptyRequest`        | `DeleteResponse`    | Delete all data in a namespace         |
-| `HybridSearch`        | `HybridSearchRequest` | `SearchResponse`    | AI Search (Vector + Graph)             |
-| `ApplyReasoning`      | `ReasoningRequest`    | `ReasoningResponse` | Trigger deductive inference            |
-
-**Proto Definition**: See [`semantic_engine.proto`](https://github.com/pmaojo/synapse-engine/blob/main/crates/semantic-engine/proto/semantic_engine.proto)
-
-### MCP Tools
-
-When running in `--mcp` mode, the engine exposes a rich set of tools via `tools/list` and `tools/call`.
-All tool inputs are strictly validated against their JSON Schema definitions.
-
-#### `query_graph`
-
-Retrieve all triples from a namespace.
-
-**Input Schema:**
-
-```json
-{
-  "namespace": "string (default: robin_os)"
-}
-```
-
-#### `ingest_triple`
-
-Add a new RDF triple to the knowledge graph.
-
-**Input Schema:**
-
-```json
-{
-  "subject": "string (required)",
-  "predicate": "string (required)",
-  "object": "string (required)",
-  "namespace": "string (default: robin_os)"
-}
-```
-
-#### `query_sparql`
-
-Execute a SPARQL query on the knowledge graph.
-
-**Input Schema:**
-
-```json
-{
-  "query": "string (required)",
-  "namespace": "string (default: robin_os)"
-}
-```
-
-### Security & Authorization
-
-Synapse implements a token-based authorization system. When using gRPC, tokens are extracted from the `Authorization: Bearer <token>` header.
-Permissions are defined via the `SYNAPSE_AUTH_TOKENS` environment variable (JSON format).
-
-Supported permissions:
-- `read`: Query data (`GetNeighbors`, `Search`, `SparqlQuery`, etc.)
-- `write`: Ingest data (`IngestTriples`, `IngestFile`)
-- `delete`: Delete data (`DeleteNamespaceData`)
-- `reason`: Trigger reasoning (`ApplyReasoning`)
+1. Agent creates `docs/concept.md` containing: `This is related to [[AnotherConcept]]`.
+2. Agent calls `index_markdown_directory` with `docs/`.
+3. Synapse parses the file, creates RDF triples linking `concept` -> `AnotherConcept`, and tracks provenance.
+4. If `AnotherConcept` implies a new rule via the Reasoner, Synapse **writes back** to the `.md` file, appending a `## 🧠 Synapse Backlinks` section automatically.
 
 ## 🏗️ Architecture
 
-### Storage Layer
-
-- **Oxigraph**: RDF triple store with SPARQL 1.1 support
-- **Namespace Isolation**: Each namespace gets its own persistent storage directory
-- **URI Mapping**: Automatic conversion between URIs and internal node IDs for gRPC compatibility
-
-### Reasoning Engine
-
-- **Reasonable**: OWL RL reasoning for automatic inference
-- **Deductive Capabilities**: Derive new facts from existing triples using ontological rules
-
-### Dual-Mode Operation
-
 ```
-┌─────────────────────────────────────┐
-│      Synapse Core Engine            │
-├─────────────────────────────────────┤
-│                                     │
-│  ┌──────────────┐  ┌─────────────┐ │
-│  │  gRPC Server │  │  MCP Server │ │
-│  │  (Port 50051)│  │  (stdio)    │ │
-│  └──────┬───────┘  └──────┬──────┘ │
-│         │                 │         │
-│         └────────┬────────┘         │
-│                  │                  │
-│         ┌────────▼────────┐         │
-│         │ MySemanticEngine│         │
-│         └────────┬────────┘         │
-│                  │                  │
-│         ┌────────▼────────┐         │
-│         │  SynapseStore   │         │
-│         │  (per namespace)│         │
-│         └────────┬────────┘         │
-│                  │                  │
-│         ┌────────▼────────┐         │
-│         │   Oxigraph RDF  │         │
-│         │   Triple Store  │         │
-│         └─────────────────┘         │
-└─────────────────────────────────────┘
+┌───────────────────────────────────────────┐
+│              Agent (LLM)                  │
+└──────────────────┬────────────────────────┘
+                   │ MCP (JSON-RPC)
+┌──────────────────▼────────────────────────┐
+│             Synapse Core                  │
+│                                           │
+│  ┌────────────────┐    ┌───────────────┐  │
+│  │   MCP Server   │────│ MD Sync Engine│  │
+│  │ (Stdio / SSE)  │    │(Parser/Writer)│  │
+│  └───────┬────────┘    └───────┬───────┘  │
+│          │                     │          │
+│  ┌───────▼─────────────────────▼───────┐  │
+│  │        SynapseReasoner (OWL-RL)     │  │
+│  │        (Fixed-Point Iteration)      │  │
+│  └───────┬─────────────────────────────┘  │
+│          │                                │
+│  ┌───────▼─────────────────────────────┐  │
+│  │  Oxigraph Store (RocksDB / Memory)  │  │
+│  └─────────────────────────────────────┘  │
+└───────────────────────────────────────────┘
 ```
-
-### Namespace Management
-
-Each namespace is completely isolated with its own:
-
-- Storage directory (`{GRAPH_STORAGE_PATH}/{namespace}`)
-- Oxigraph store instance
-- URI-to-ID mapping tables
-
-This enables multi-tenant scenarios and context separation.
 
 ## ⚙️ Configuration
 
-### Environment Variables
-
 | Variable                | Default       | Description                                  |
 | ----------------------- | ------------- | -------------------------------------------- |
-| `GRAPH_STORAGE_PATH`    | `data/graphs` | Root directory for namespace storage         |
-| `HUGGINGFACE_API_TOKEN` | `(optional)`  | Token for Inference API (higher rate limits) |
-
-### Storage Structure
-
-```
-data/graphs/
-├── default/          # Default namespace
-├── work/             # Work namespace
-└── personal/         # Personal namespace
-```
-
-## 🤝 Contributing
-
-Contributions are welcome! Please check the [repository](https://github.com/pmaojo/synapse-engine) for guidelines.
+| `GRAPH_STORAGE_PATH`    | `data/graphs` | Root directory for RocksDB storage           |
+| `SYNAPSE_MCP_PORT`      | `3000`        | Port for the HTTP/SSE Ext-Apps Server        |
 
 ## 📄 License
 
-This project is licensed under the [MIT License](LICENSE).
-
----
-
-**Built with ❤️ using Rust, Oxigraph, and Tonic**
+This project is licensed under the [MIT License](../../LICENSE).
