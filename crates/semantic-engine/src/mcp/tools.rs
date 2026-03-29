@@ -80,7 +80,7 @@ pub async fn handle_tool_call(
                             Ok(json!({
                                 "content": [
                                     { "type": "text", "text": format!("Neighborhood of {}:\n{}", uri, text_output) },
-                                    { "type": "resource", "resource": { "uri": interactive_ui_uri } }
+                                    { "type": "resource", "resource": { "uri": interactive_ui_uri, "mimeType": "text/html" } }
                                 ]
                             }))
                         }

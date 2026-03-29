@@ -22,6 +22,12 @@ fi
 
 cd "$(dirname "$0")/crates/semantic-engine"
 
+echo "📦 Building Frontend Ext-App..."
+cd ../../frontend
+npm install
+npm run build
+cd ../crates/semantic-engine
+
 # Build the server
 echo "📦 Building Rust server..."
 cargo build --release
