@@ -31,7 +31,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("🚀 Synapse Engine starting (Pure Symbolic Mode, MCP Ext-Apps ready)");
         println!("Storage Path: {}", storage_path);
 
-        start_mcp_server(port, store).await;
+        start_mcp_server(port, store).await?;
     }
 
     Ok(())

@@ -21,7 +21,7 @@ struct AppState {
     store: Arc<SynapseStore>,
 }
 
-pub async fn start_mcp_server(port: u16, store: Arc<SynapseStore>) {
+pub async fn start_mcp_server(port: u16, store: Arc<SynapseStore>) -> Result<(), Box<dyn std::error::Error>> {
     let state = AppState { store };
 
     let app = Router::new()
@@ -32,10 +32,11 @@ pub async fn start_mcp_server(port: u16, store: Arc<SynapseStore>) {
         .with_state(state);
 
     let addr = format!("0.0.0.0:{}", port);
-    let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
+    let listener = tokio::net::TcpListener::bind(&addr).await?;
     println!("🚀 MCP HTTP/SSE Server listening on {}", addr);
 
-    axum::serve(listener, app).await.unwrap();
+    axum::serve(listener, app).await?;
+    Ok(())
 }
 
 async fn handle_mcp_request(

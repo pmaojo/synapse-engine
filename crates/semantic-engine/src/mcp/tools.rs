@@ -48,7 +48,7 @@ pub async fn handle_tool_call(
         })),
         "tools/call" => {
             let p = params.ok_or("Missing params")?;
-            let name = p["name"].as_str().unwrap_or("");
+            let name = p["name"].as_str().ok_or("Missing tool name")?;
             let args = p.get("arguments").cloned().unwrap_or(json!({}));
 
             match name {
@@ -101,8 +101,9 @@ pub async fn handle_tool_call(
                         if path.is_file() {
                             if let Some(ext) = path.extension() {
                                 if ext == "md" || ext == "markdown" {
-                                    if let Ok(count) = engine.ingest_file(path, "default").await {
-                                        total_added += count;
+                                    match engine.ingest_file(path, "default").await {
+                                        Ok(count) => total_added += count,
+                                        Err(e) => eprintln!("Failed to index file {}: {}", path.display(), e),
                                     }
                                 }
                             }
