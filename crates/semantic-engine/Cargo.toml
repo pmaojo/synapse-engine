@@ -1,6 +1,6 @@
 [package]
 name = "synapse-core"
-version = "0.9.0"
+version = "1.0.0"
 edition.workspace = true
 description = "The Symbolic AGI Memory Core (Pure Graph, No Vectors)"
 readme = "README.md"
