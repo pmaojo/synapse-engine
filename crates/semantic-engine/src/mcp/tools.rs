@@ -127,14 +127,13 @@ pub async fn handle_tool_call(
                         format!("urn:batch:{}", hash)
                     };
 
-                    // Use FILTER(STRSTARTS) to handle truncated hashes correctly
+                    // Use FILTER(STRSTARTS) to handle truncated hashes correctly.
+                    // Provenance triples are stored in the default graph for easy querying.
                     let query = format!("
                         PREFIX prov: <http://www.w3.org/ns/prov#>
                         SELECT ?graph ?p ?o
                         WHERE {{
-                            GRAPH ?graph {{
-                                ?graph ?p ?o .
-                            }}
+                            ?graph ?p ?o .
                             FILTER(STRSTARTS(STR(?graph), \"{}\"))
                         }}
                     ", hash_str);
@@ -228,6 +227,8 @@ pub async fn handle_tool_call(
                 "get_entity_narrative" => {
                     let entity_id = args["entity_id"].as_str().ok_or("Missing entity_id")?;
                     // We add ORDER BY ?time DESC to get adaptive context window based on recency
+                    // Core properties (like type) are stored in the default graph, so we query without GRAPH restriction,
+                    // and use OPTIONAL GRAPH to get provenance metadata if available.
                     let query = format!("
                         PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
                         PREFIX prov: <http://www.w3.org/ns/prov#>
@@ -235,15 +236,14 @@ pub async fn handle_tool_call(
 
                         SELECT ?p ?o ?g ?time
                         WHERE {{
-                            GRAPH ?g {{
-                                <{}> ?p ?o .
-                                OPTIONAL {{
-                                    ?g prov:generatedAtTime ?time .
-                                }}
+                            <{}> ?p ?o .
+                            OPTIONAL {{
+                                GRAPH ?g {{ <{}> ?p ?o . }}
+                                ?g prov:generatedAtTime ?time .
                             }}
                         }}
                         ORDER BY DESC(?time)
-                    ", store.ensure_uri(entity_id));
+                    ", store.ensure_uri(entity_id), store.ensure_uri(entity_id));
 
                     let inbound_query = format!("
                         PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
@@ -252,15 +252,14 @@ pub async fn handle_tool_call(
 
                         SELECT ?s ?p ?g ?time
                         WHERE {{
-                            GRAPH ?g {{
-                                ?s ?p <{}> .
-                                OPTIONAL {{
-                                    ?g prov:generatedAtTime ?time .
-                                }}
+                            ?s ?p <{}> .
+                            OPTIONAL {{
+                                GRAPH ?g {{ ?s ?p <{}> . }}
+                                ?g prov:generatedAtTime ?time .
                             }}
                         }}
                         ORDER BY DESC(?time)
-                    ", store.ensure_uri(entity_id));
+                    ", store.ensure_uri(entity_id), store.ensure_uri(entity_id));
 
                     let mut type_val = String::from("Unknown");
                     let mut attributes = Vec::new();

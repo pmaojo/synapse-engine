@@ -121,8 +121,8 @@ impl IngestionEngine {
             WHERE {
                 GRAPH ?g {
                     ?s ?p ?o .
-                    ?g prov:generatedAtTime ?time .
                 }
+                ?g prov:generatedAtTime ?time .
             }
             GROUP BY ?s ?time
             ORDER BY DESC(?time) DESC(?density)
