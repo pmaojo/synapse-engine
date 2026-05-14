@@ -21,27 +21,53 @@ impl IngestionEngine {
             .unwrap_or("")
             .to_lowercase();
 
-        match extension.as_str() {
-            "md" | "markdown" => self.ingest_markdown(path).await,
+        let res = match extension.as_str() {
+            "md" | "markdown" => self.ingest_markdown(path, namespace).await,
             "csv" => self.ingest_csv(path, namespace).await,
             "owl" | "ttl" | "rdf" | "xml" => {
                 let count = ontology::OntologyLoader::load_file(&self.store, path).await?;
                 Ok(count as u32)
             }
             _ => Err(anyhow::anyhow!("Unsupported file type: {}", extension)),
+        };
+
+        if res.is_ok() {
+            if let Err(e) = self.generate_cache_digest() {
+                eprintln!("Warning: Failed to generate cache digest: {}", e);
+            }
         }
+
+        res
     }
 
-    async fn ingest_markdown(&self, path: &Path) -> Result<u32> {
+    async fn ingest_markdown(&self, path: &Path, role: &str) -> Result<u32> {
         use crate::md_sync::parser::MarkdownDocument;
+        use oxigraph::model::{NamedNode, Quad, Subject, Term, GraphName};
         let content = std::fs::read_to_string(path)?;
 
         let doc = MarkdownDocument::parse(path, &content)?;
         let quads = doc.to_quads();
         let mut added = 0;
 
+        let p_role = NamedNode::new("http://www.w3.org/ns/prov#Role").unwrap();
+
         for quad in quads {
-            if self.store.store.insert(&quad)? {
+            let modified_quad = quad.clone();
+            // If the ingest request specified an elevated role (e.g. CoreSpecification), we inject it
+            if role != "default" {
+                if let GraphName::NamedNode(batch_node) = &quad.graph_name {
+                    let o_role = Term::Literal(oxigraph::model::Literal::new_simple_literal(role));
+                    let role_quad = Quad::new(
+                        Subject::NamedNode(batch_node.clone()),
+                        p_role.clone(),
+                        o_role,
+                        GraphName::DefaultGraph
+                    );
+                    let _ = self.store.store.insert(&role_quad);
+                }
+            }
+
+            if self.store.store.insert(&modified_quad)? {
                 added += 1;
             }
         }
@@ -84,5 +110,52 @@ impl IngestionEngine {
 
         let (added, _) = self.store.ingest_triples(triples).await?;
         Ok(added)
+    }
+
+    fn generate_cache_digest(&self) -> Result<()> {
+        let query = "
+            PREFIX prov: <http://www.w3.org/ns/prov#>
+            PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
+
+            SELECT ?s ?time (COUNT(?p) as ?density)
+            WHERE {
+                GRAPH ?g {
+                    ?s ?p ?o .
+                }
+                ?g prov:generatedAtTime ?time .
+            }
+            GROUP BY ?s ?time
+            ORDER BY DESC(?time) DESC(?density)
+            LIMIT 5
+        ";
+
+        let result = self.store.query_sparql(query)?;
+        let mut content = String::from("# Synapse Semantic Cache Digest\n\n_Auto-generated \"Morning Briefing\" of recent hot paths._\n\n## Most Recently Modified Entities:\n");
+
+        if let Ok(json_res) = serde_json::from_str::<serde_json::Value>(&result) {
+            if let serde_json::Value::Array(arr) = json_res {
+                if arr.is_empty() {
+                    content.push_str("No recent activity found.\n");
+                } else {
+                    for row in arr {
+                        let s = row.get("s").and_then(|v| v.as_str()).unwrap_or("Unknown").trim_matches('"');
+                        let time = row.get("time").and_then(|v| v.as_str()).unwrap_or("Unknown").trim_matches('"');
+                        let density = row.get("density").and_then(|v| v.as_str()).unwrap_or("0").trim_matches('"');
+
+                        // Try to get type or name if possible, simplified for the digest
+                        content.push_str(&format!("* **{}** (Edges: {}, Last Modified: {})\n", s, density, time));
+                    }
+                }
+            }
+        } else {
+            content.push_str("Error parsing SPARQL results.\n");
+        }
+
+        let synapse_dir = Path::new(".synapse/state");
+        std::fs::create_dir_all(synapse_dir)?;
+        let digest_path = synapse_dir.join("current_digest.md");
+        std::fs::write(&digest_path, content)?;
+
+        Ok(())
     }
 }
