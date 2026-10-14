@@ -1,12 +1,12 @@
 [Unit]
-Description=Synapse Neuro-symbolic Knowledge Graph
+Description=Synapse symbolic knowledge graph (MCP over HTTP)
 After=network.target
 
 [Service]
 Type=simple
 User=%i
-Environment="SYNAPSE_AUTH_TOKENS={\"test\": [\"*\"]}"
 Environment="GRAPH_STORAGE_PATH=/var/lib/synapse/graphs"
+Environment="SYNAPSE_MCP_PORT=3000"
 ExecStart=/usr/local/bin/synapse
 Restart=on-failure
 RestartSec=5

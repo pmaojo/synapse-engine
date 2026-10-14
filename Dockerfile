@@ -1,79 +1,37 @@
-FROM alpine:edge as builder
+FROM node:22-bookworm-slim AS frontend
 
-# Add edge community repository for onnxruntime, rust, and other dependencies
-RUN echo "http://dl-cdn.alpinelinux.org/alpine/edge/community" >> /etc/apk/repositories
+WORKDIR /usr/src/frontend
+COPY frontend/package.json frontend/package-lock.json ./
+RUN npm ci
+COPY frontend/ ./
+RUN npm run build
 
-# Install build dependencies
-# - rust, cargo: Required for building Rust code
-# - musl-dev, gcc, g++, make: Standard build tools
-# - perl: Required for OpenSSL build scripts (if building from source)
-# - protobuf: Required for prost-build (protoc)
-# - openssl-dev: Required for linking against system OpenSSL (dynamic)
-# - onnxruntime-dev: Required for linking against system ONNX Runtime (dynamic)
-# - abseil-cpp-dev: Required by onnxruntime-dev
-# - protobuf-dev: Required by onnxruntime-dev (for libprotobuf-lite)
-# - pkgconfig: Required to find system libraries
-# - clang, clang-dev: Required by some crates
-# - clang-static: Required for bindgen on musl (dynamic loading not supported)
-# - git: Required by cargo
-RUN apk update && apk add --no-cache \
-    rust \
-    cargo \
-    musl-dev \
-    perl \
-    make \
-    gcc \
-    g++ \
-    git \
-    protobuf \
-    openssl-dev \
-    onnxruntime-dev \
-    abseil-cpp-dev \
-    protobuf-dev \
-    pkgconfig \
+FROM rust:1-bookworm AS builder
+
+# clang/libclang are needed by bindgen when building RocksDB (oxrocksdb-sys)
+RUN apt-get update && apt-get install -y --no-install-recommends \
     clang \
-    clang-dev \
-    clang-static
+    libclang-dev \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /usr/src/synapse
 COPY . .
 
-# Set environment variables
-# OPENSSL_NO_VENDOR=1: Use system OpenSSL (dynamic)
-# ORT_STRATEGY=system: Use system ONNX Runtime (dynamic)
-# LIBCLANG_PATH: Explicitly point to the directory containing libclang.a/so
-# LIBCLANG_STATIC_PATH: Force bindgen to link statically against libclang
-ENV OPENSSL_NO_VENDOR=1
-ENV ORT_STRATEGY=system
-ENV LIBCLANG_PATH=/usr/lib
-ENV LIBCLANG_STATIC_PATH=/usr/lib
-
-# Build the binary
-# Note: The resulting binary will be dynamically linked against musl, openssl, onnxruntime, abseil, and protobuf
-# This is required because onnxruntime static binaries are not available for musl
 RUN cargo build --release -p synapse-core
 
-# Final stage
-FROM alpine:edge
+FROM debian:bookworm-slim
 
-# Add edge community repository for runtime dependencies
-RUN echo "http://dl-cdn.alpinelinux.org/alpine/edge/community" >> /etc/apk/repositories
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install runtime dependencies
-RUN apk add --no-cache \
-    libgcc \
-    libstdc++ \
-    openssl \
-    onnxruntime \
-    abseil-cpp \
-    protobuf \
-    ca-certificates
-
-# Copy the binary from the builder stage
 COPY --from=builder /usr/src/synapse/target/release/synapse /usr/local/bin/synapse
+# MCP App UI served for ui:// resources (looked up at /app/frontend/dist/index.html)
+COPY --from=frontend /usr/src/frontend/dist /app/frontend/dist
+WORKDIR /app
 
 ENV GRAPH_STORAGE_PATH=/data/graphs
 VOLUME /data/graphs
-EXPOSE 50051
+EXPOSE 3000
 
 ENTRYPOINT ["synapse"]

@@ -35,3 +35,6 @@ env/
 logs/
 *.log
 *.txt
+
+# Runtime digest written by the engine
+.synapse/

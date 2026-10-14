@@ -1,86 +1,51 @@
-use crate::store::{IngestTriple, Provenance, SynapseStore};
-use anyhow::Result;
-use oxigraph::io::RdfFormat;
-use oxigraph::io::RdfParser;
-use std::fs;
+use crate::iri;
+use crate::store::{GraphMeta, SynapseStore, KIND_SOURCE};
+use anyhow::{anyhow, Result};
+use oxigraph::io::{RdfFormat, RdfParser};
+use oxigraph::model::Triple;
+use sha2::{Digest, Sha256};
 use std::path::Path;
 
 pub struct OntologyLoader;
 
+pub struct LoadOutcome {
+    pub triples: usize,
+    /// False when the file was already loaded with the same content.
+    pub changed: bool,
+}
+
 impl OntologyLoader {
-    pub async fn load_directory(store: &SynapseStore, dir_path: &Path) -> Result<usize> {
-        let mut total_triples = 0;
-
-        if !dir_path.exists() {
-            eprintln!("Ontology directory not found: {:?}", dir_path);
-            return Ok(0);
+    /// Loads an RDF file into its own named graph, replacing what a previous
+    /// load of the same file put there. Unchanged files are skipped.
+    pub fn load_file(store: &SynapseStore, path: &Path) -> Result<LoadOutcome> {
+        let bytes = std::fs::read(path)?;
+        let path_str = path.canonicalize().unwrap_or_else(|_| path.to_path_buf()).to_string_lossy().to_string();
+        let graph = iri::source_graph(&path_str);
+        let hash = hex::encode(Sha256::digest(&bytes));
+        if store.graph_meta_value(&graph, "contentHash").as_deref() == Some(hash.as_str()) {
+            return Ok(LoadOutcome { triples: 0, changed: false });
         }
 
-        let entries = fs::read_dir(dir_path)?;
-
-        for entry in entries {
-            if let Ok(entry) = entry {
-                let path = entry.path();
-                if path.is_file() {
-                    if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-                        let ext = ext.to_lowercase();
-                        if matches!(ext.as_str(), "owl" | "ttl" | "rdf" | "xml") {
-                            eprintln!("Loading ontology: {:?}", path.file_name().unwrap());
-                            match Self::load_file(store, &path).await {
-                                Ok(count) => {
-                                    total_triples += count;
-                                    eprintln!("  Loaded {} triples", count);
-                                }
-                                Err(e) => {
-                                    eprintln!("  Failed to load ontology {:?}: {}", path.display(), e);
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        Ok(total_triples)
-    }
-
-    pub async fn load_file(store: &SynapseStore, path: &Path) -> Result<usize> {
-        let file = fs::File::open(path)?;
-        let reader = std::io::BufReader::new(file);
-
-        // Determine format based on extension
-        let format = if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-            match ext.to_lowercase().as_str() {
-                "ttl" => RdfFormat::Turtle,
-                "rdf" | "owl" | "xml" => RdfFormat::RdfXml,
-                _ => RdfFormat::Turtle, // Default fallback
-            }
-        } else {
-            RdfFormat::Turtle
+        let format = match path.extension().and_then(|e| e.to_str()).map(str::to_lowercase).as_deref() {
+            Some("rdf" | "owl" | "xml") => RdfFormat::RdfXml,
+            Some("nt") => RdfFormat::NTriples,
+            _ => RdfFormat::Turtle,
         };
+        let triples = RdfParser::from_format(format)
+            .rename_blank_nodes()
+            .for_reader(bytes.as_slice())
+            .map(|q| q.map(|q| Triple::new(q.subject, q.predicate, q.object)))
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| anyhow!("Parse error in {}: {}", path.display(), e))?;
 
-        let mut ingest_triples = Vec::new();
-        let parser = RdfParser::from_format(format);
-
-        for triple_result in parser.for_reader(reader) {
-            let triple = triple_result.map_err(|e| anyhow::anyhow!("Parse error: {}", e))?;
-
-            ingest_triples.push(IngestTriple {
-                subject: triple.subject.to_string(),
-                predicate: triple.predicate.to_string(),
-                object: triple.object.to_string(),
-                provenance: Some(Provenance {
-                    source: path.file_name().unwrap().to_string_lossy().to_string(),
-                    timestamp: chrono::Utc::now().to_rfc3339(),
-                    method: "ontology_loader".to_string(),
-                }),
-            });
-        }
-
-        let count = ingest_triples.len();
-        if count > 0 {
-            store.ingest_triples(ingest_triples).await?;
-        }
-
-        Ok(count)
+        let meta = GraphMeta {
+            kind: KIND_SOURCE.to_string(),
+            derived_from: Some(iri::file_iri(&path_str)),
+            method: Some("ontology_loader".to_string()),
+            content_hash: Some(hash),
+            ..Default::default()
+        };
+        let triples = store.replace_graph(&graph, &triples, &meta)?;
+        Ok(LoadOutcome { triples, changed: true })
     }
 }

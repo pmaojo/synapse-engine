@@ -1,9 +1,28 @@
-pub mod extractor;
 pub mod ontology;
 
-use crate::store::{IngestTriple, SynapseStore};
-use anyhow::Result;
-use std::path::Path;
+use crate::iri;
+use crate::md_sync::parser::MarkdownDocument;
+use crate::store::{GraphMeta, SynapseStore, KIND_SOURCE};
+use anyhow::{anyhow, Result};
+use oxigraph::model::{Literal, NamedNode, Term, Triple};
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
+use walkdir::WalkDir;
+
+#[derive(Debug, Default)]
+pub struct IndexReport {
+    pub changed: usize,
+    pub unchanged: usize,
+    /// Sources indexed from this root before whose files no longer exist.
+    pub removed: usize,
+    pub triples: usize,
+    pub errors: Vec<String>,
+}
+
+enum FileOutcome {
+    Unchanged,
+    Changed { triples: usize, affected: HashSet<NamedNode> },
+}
 
 pub struct IngestionEngine {
     store: std::sync::Arc<SynapseStore>,
@@ -14,108 +33,163 @@ impl IngestionEngine {
         Self { store }
     }
 
-    pub async fn ingest_file(&self, path: &Path, namespace: &str) -> Result<u32> {
-        let extension = path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("")
-            .to_lowercase();
+    /// Indexes every Markdown file under `dir`. Each file owns one named graph
+    /// that is replaced when the file changes and dropped when it disappears;
+    /// entity ids are the file paths relative to `dir` (OKF `concept_id`s).
+    pub async fn index_markdown_directory(&self, dir: &Path) -> Result<IndexReport> {
+        let root = dir.canonicalize().map_err(|e| anyhow!("cannot open {}: {e}", dir.display()))?;
+        let root_str = root.to_string_lossy().to_string();
+        let mut report = IndexReport::default();
+        let mut seen = HashSet::new();
+        let mut affected = HashSet::new();
 
-        let res = match extension.as_str() {
-            "md" | "markdown" => self.ingest_markdown(path, namespace).await,
-            "csv" => self.ingest_csv(path, namespace).await,
-            "owl" | "ttl" | "rdf" | "xml" => {
-                let count = ontology::OntologyLoader::load_file(&self.store, path).await?;
-                Ok(count as u32)
+        for entry in WalkDir::new(&root).into_iter().filter_map(|e| e.ok()) {
+            let path = entry.path();
+            if !path.is_file() || !is_markdown(path) {
+                continue;
             }
-            _ => Err(anyhow::anyhow!("Unsupported file type: {}", extension)),
-        };
-
-        if res.is_ok() {
-            if let Err(e) = self.generate_cache_digest() {
-                eprintln!("Warning: Failed to generate cache digest: {}", e);
-            }
-        }
-
-        res
-    }
-
-    async fn ingest_markdown(&self, path: &Path, role: &str) -> Result<u32> {
-        use crate::md_sync::parser::MarkdownDocument;
-        use oxigraph::model::{NamedNode, Quad, Subject, Term, GraphName};
-        let content = std::fs::read_to_string(path)?;
-
-        let doc = MarkdownDocument::parse(path, &content)?;
-        let quads = doc.to_quads();
-        let mut added = 0;
-
-        let p_role = NamedNode::new("http://www.w3.org/ns/prov#Role").unwrap();
-
-        for quad in quads {
-            let modified_quad = quad.clone();
-            // If the ingest request specified an elevated role (e.g. CoreSpecification), we inject it
-            if role != "default" {
-                if let GraphName::NamedNode(batch_node) = &quad.graph_name {
-                    let o_role = Term::Literal(oxigraph::model::Literal::new_simple_literal(role));
-                    let role_quad = Quad::new(
-                        Subject::NamedNode(batch_node.clone()),
-                        p_role.clone(),
-                        o_role,
-                        GraphName::DefaultGraph
-                    );
-                    let _ = self.store.store.insert(&role_quad);
+            seen.insert(iri::source_graph(&path.to_string_lossy()));
+            match self.ingest_markdown(&root, path, None) {
+                Ok(FileOutcome::Unchanged) => report.unchanged += 1,
+                Ok(FileOutcome::Changed { triples, affected: a }) => {
+                    report.changed += 1;
+                    report.triples += triples;
+                    affected.extend(a);
                 }
-            }
-
-            if self.store.store.insert(&modified_quad)? {
-                added += 1;
+                Err(e) => report.errors.push(format!("{}: {e}", path.display())),
             }
         }
 
-        // El motor lógic se actualizará durante la fase 4 (SynapseReasoner)
-        Ok(added)
+        for graph in self.store.graphs_indexed_from(&root_str) {
+            if !seen.contains(&graph) {
+                affected.extend(self.entities_in_graph(&graph));
+                self.store.drop_graph(&graph)?;
+                report.removed += 1;
+            }
+        }
+
+        self.store.sync_entities_to_markdown(&affected);
+        if report.changed + report.removed > 0 {
+            self.digest();
+        }
+        Ok(report)
     }
 
-    async fn ingest_csv(&self, path: &Path, _namespace: &str) -> Result<u32> {
-        let mut reader = csv::Reader::from_path(path)?;
-        let headers = reader.headers()?.clone();
+    /// Ingests a single file. A Markdown file gets the id of its file stem
+    /// (its parent directory acts as the root).
+    pub async fn ingest_file(&self, path: &Path, role: Option<&str>) -> Result<usize> {
+        let path = path.canonicalize().map_err(|e| anyhow!("cannot open {}: {e}", path.display()))?;
+        let extension = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
 
-        let mut triples = Vec::new();
-        let filename = path.file_name().unwrap().to_string_lossy();
-
-        for result in reader.records() {
-            let record = result?;
-            // Assume first column is ID/Subject
-            if let Some(subject) = record.get(0) {
-                let subject_uri = format!("urn:csv:{}:{}", filename, subject); // basic namespacing
-
-                for (j, field) in record.iter().enumerate().skip(1) {
-                    if let Some(header) = headers.get(j) {
-                        if !field.is_empty() {
-                            triples.push(IngestTriple {
-                                subject: subject_uri.clone(),
-                                predicate: format!("urn:csv:prop:{}", header),
-                                object: field.to_string(),
-                                provenance: Some(crate::store::Provenance {
-                                    source: path.to_string_lossy().to_string(),
-                                    timestamp: chrono::Utc::now().to_rfc3339(),
-                                    method: "csv_extractor".to_string(),
-                                }),
-                            });
-                        }
+        let count = match extension.as_str() {
+            "md" | "markdown" => {
+                let root = path.parent().unwrap_or(Path::new("/")).to_path_buf();
+                match self.ingest_markdown(&root, &path, role)? {
+                    FileOutcome::Unchanged => 0,
+                    FileOutcome::Changed { triples, affected } => {
+                        self.store.sync_entities_to_markdown(&affected);
+                        triples
                     }
                 }
             }
+            "csv" => self.ingest_csv(&path)?,
+            "owl" | "ttl" | "rdf" | "xml" | "nt" => ontology::OntologyLoader::load_file(&self.store, &path)?.triples,
+            _ => return Err(anyhow!("Unsupported file type: {}", extension)),
+        };
+        self.digest();
+        Ok(count)
+    }
+
+    fn ingest_markdown(&self, root: &Path, path: &Path, role: Option<&str>) -> Result<FileOutcome> {
+        let content = std::fs::read_to_string(path)?;
+        let path_str = path.to_string_lossy().to_string();
+        let doc = MarkdownDocument::parse(&concept_id(root, path), path, &content)?;
+        let graph = iri::source_graph(&path_str);
+
+        let same_content = self.store.graph_meta_value(&graph, "contentHash").as_deref() == Some(doc.content_hash.as_str());
+        let same_role = self.store.graph_meta_value(&graph, "role").as_deref() == role;
+        if same_content && same_role {
+            return Ok(FileOutcome::Unchanged);
         }
 
-        let (added, _) = self.store.ingest_triples(triples).await?;
-        Ok(added)
+        let triples = doc.to_triples()?;
+        let mut affected = self.entities_in_graph(&graph);
+        affected.insert(doc.subject()?);
+        affected.extend(triples.iter().filter_map(|t| match &t.object {
+            Term::NamedNode(n) => Some(n.clone()),
+            _ => None,
+        }));
+
+        let meta = GraphMeta {
+            kind: KIND_SOURCE.to_string(),
+            derived_from: Some(iri::file_iri(&path_str)),
+            method: Some("markdown".to_string()),
+            content_hash: Some(doc.content_hash.clone()),
+            concept_id: Some(doc.concept_id.clone()),
+            index_root: Some(root.to_string_lossy().to_string()),
+            role: role.map(str::to_string),
+            ..Default::default()
+        };
+        let triples_count = self.store.replace_graph(&graph, &triples, &meta)?;
+        Ok(FileOutcome::Changed { triples: triples_count, affected })
+    }
+
+    fn ingest_csv(&self, path: &Path) -> Result<usize> {
+        let mut reader = csv::Reader::from_path(path)?;
+        let headers = reader.headers()?.clone();
+        let filename = path.file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default();
+
+        let mut triples = Vec::new();
+        for record in reader.records() {
+            let record = record?;
+            // First column is the row id.
+            let Some(id) = record.get(0).filter(|id| !id.is_empty()) else { continue };
+            let subject = iri::entity(&format!("csv/{filename}/{id}"))?;
+            for (j, field) in record.iter().enumerate().skip(1) {
+                if let (Some(header), false) = (headers.get(j), field.is_empty()) {
+                    triples.push(Triple::new(subject.clone(), iri::predicate(header)?, Literal::new_simple_literal(field)));
+                }
+            }
+        }
+
+        let path_str = path.to_string_lossy().to_string();
+        let meta = GraphMeta {
+            kind: KIND_SOURCE.to_string(),
+            derived_from: Some(iri::file_iri(&path_str)),
+            method: Some("csv".to_string()),
+            ..Default::default()
+        };
+        self.store.replace_graph(&iri::source_graph(&path_str), &triples, &meta)
+    }
+
+    fn entities_in_graph(&self, graph: &NamedNode) -> HashSet<NamedNode> {
+        self.store
+            .store
+            .quads_for_pattern(None, None, None, Some(graph.as_ref().into()))
+            .flatten()
+            .flat_map(|q| {
+                let s = match q.subject {
+                    oxigraph::model::Subject::NamedNode(n) => Some(n),
+                    _ => None,
+                };
+                let o = match q.object {
+                    Term::NamedNode(n) => Some(n),
+                    _ => None,
+                };
+                s.into_iter().chain(o)
+            })
+            .collect()
+    }
+
+    fn digest(&self) {
+        if let Err(e) = self.generate_cache_digest() {
+            eprintln!("Warning: Failed to generate cache digest: {}", e);
+        }
     }
 
     fn generate_cache_digest(&self) -> Result<()> {
         let query = "
             PREFIX prov: <http://www.w3.org/ns/prov#>
-            PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
 
             SELECT ?s ?time (COUNT(?p) as ?density)
             WHERE {
@@ -132,30 +206,44 @@ impl IngestionEngine {
         let result = self.store.query_sparql(query)?;
         let mut content = String::from("# Synapse Semantic Cache Digest\n\n_Auto-generated \"Morning Briefing\" of recent hot paths._\n\n## Most Recently Modified Entities:\n");
 
-        if let Ok(json_res) = serde_json::from_str::<serde_json::Value>(&result) {
-            if let serde_json::Value::Array(arr) = json_res {
-                if arr.is_empty() {
-                    content.push_str("No recent activity found.\n");
-                } else {
-                    for row in arr {
-                        let s = row.get("s").and_then(|v| v.as_str()).unwrap_or("Unknown").trim_matches('"');
-                        let time = row.get("time").and_then(|v| v.as_str()).unwrap_or("Unknown").trim_matches('"');
-                        let density = row.get("density").and_then(|v| v.as_str()).unwrap_or("0").trim_matches('"');
-
-                        // Try to get type or name if possible, simplified for the digest
-                        content.push_str(&format!("* **{}** (Edges: {}, Last Modified: {})\n", s, density, time));
-                    }
+        match serde_json::from_str::<Vec<serde_json::Value>>(&result) {
+            Ok(arr) if arr.is_empty() => content.push_str("No recent activity found.\n"),
+            Ok(arr) => {
+                for row in arr {
+                    let get = |k: &str| row.get(k).and_then(|v| v.as_str()).unwrap_or("Unknown").to_string();
+                    content.push_str(&format!("* **{}** (Edges: {}, Last Modified: {})\n", get("s"), get("density"), get("time")));
                 }
             }
-        } else {
-            content.push_str("Error parsing SPARQL results.\n");
+            Err(_) => content.push_str("Error parsing SPARQL results.\n"),
         }
 
         let synapse_dir = Path::new(".synapse/state");
         std::fs::create_dir_all(synapse_dir)?;
-        let digest_path = synapse_dir.join("current_digest.md");
-        std::fs::write(&digest_path, content)?;
-
+        std::fs::write(synapse_dir.join("current_digest.md"), content)?;
         Ok(())
+    }
+}
+
+fn is_markdown(path: &Path) -> bool {
+    matches!(path.extension().and_then(|e| e.to_str()), Some("md" | "markdown"))
+}
+
+/// `root/people/bob.md` -> `people/bob`.
+pub fn concept_id(root: &Path, path: &Path) -> String {
+    let rel: PathBuf = path.strip_prefix(root).unwrap_or(path).with_extension("");
+    rel.components()
+        .map(|c| c.as_os_str().to_string_lossy().to_string())
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn concept_ids_are_relative_paths_without_extension() {
+        assert_eq!(concept_id(Path::new("/kb"), Path::new("/kb/people/bob.md")), "people/bob");
+        assert_eq!(concept_id(Path::new("/kb"), Path::new("/kb/Bob.markdown")), "Bob");
     }
 }

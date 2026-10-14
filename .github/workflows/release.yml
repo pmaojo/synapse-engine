@@ -38,13 +38,9 @@ jobs:
           toolchain: 1.88
           targets: ${{ matrix.target }}
 
-      - name: Install Protoc and Clang (Linux)
+      - name: Install Clang (Linux)
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y protobuf-compiler clang libclang-dev musl-tools libssl-dev pkg-config
-
-      - name: Install Protoc (macOS)
-        if: matrix.os == 'macos-latest'
-        run: brew install protobuf
+        run: sudo apt-get update && sudo apt-get install -y clang libclang-dev musl-tools pkg-config
 
       - name: Build Binary
         run: |

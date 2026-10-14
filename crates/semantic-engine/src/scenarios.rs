@@ -220,6 +220,31 @@ impl ScenarioManager {
         Ok(())
     }
 
+    /// Directory of an installed scenario, or of the repo's `scenarios/` copy in dev.
+    pub fn scenario_dir(&self, scenario_name: &str) -> Option<PathBuf> {
+        [self.base_path.join("scenarios").join(scenario_name), Path::new("scenarios").join(scenario_name)]
+            .into_iter()
+            .find(|d| d.join("manifest.json").exists())
+    }
+
+    /// Loads a scenario's ontologies, each into its own source graph (unchanged
+    /// files are skipped, so this is cheap to call at every startup).
+    pub async fn load_scenario(&self, store: &crate::store::SynapseStore, scenario_name: &str) -> Result<usize> {
+        let dir = self
+            .scenario_dir(scenario_name)
+            .ok_or_else(|| anyhow::anyhow!("Scenario '{}' is not installed", scenario_name))?;
+        let manifest: Manifest = serde_json::from_str(&fs::read_to_string(dir.join("manifest.json")).await?)?;
+        let mut loaded = 0;
+        for file in &manifest.ontologies {
+            let path = dir.join("schema").join(file);
+            match crate::ingest::ontology::OntologyLoader::load_file(store, &path) {
+                Ok(out) => loaded += out.triples,
+                Err(e) => eprintln!("Warning: scenario '{}': {}", scenario_name, e),
+            }
+        }
+        Ok(loaded)
+    }
+
     pub async fn get_manifest(&self, scenario_name: &str) -> Result<Manifest> {
         let manifest_path = self
             .base_path

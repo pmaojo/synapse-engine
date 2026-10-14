@@ -1,48 +1,29 @@
 #!/bin/bash
-# Start the Synapse Semantic Engine (ex-Grafoso)
+# Build and start Synapse.
+#   ./start_rust_server.sh          -> MCP over HTTP on $SYNAPSE_MCP_PORT (default 3000)
+#   ./start_rust_server.sh --stdio  -> MCP over stdin/stdout
+set -euo pipefail
 
-MODE="grpc"
-if [[ "$1" == "--mcp" ]]; then
-    MODE="mcp"
-fi
+cd "$(dirname "$0")"
 
-echo "🚀 Starting Synapse ($MODE mode)..."
-echo ""
-
-# Check if cargo is in path
 if ! command -v cargo &> /dev/null; then
-    # Try common local path
     if [ -f "$HOME/.cargo/bin/cargo" ]; then
         export PATH="$PATH:$HOME/.cargo/bin"
     else
-        echo "❌ cargo not found. Please install Rust: https://rustup.rs"
+        echo "cargo not found. Install Rust: https://rustup.rs" >&2
         exit 1
     fi
 fi
 
-cd "$(dirname "$0")/crates/semantic-engine"
-
-echo "📦 Building Frontend Ext-App..."
-cd ../../frontend
-npm install
-npm run build
-cd ../crates/semantic-engine
-
-# Build the server
-echo "📦 Building Rust server..."
-cargo build --release
-
-if [ $? -eq 0 ]; then
-    echo "✅ Build successful!"
-    echo ""
-    if [[ "$MODE" == "mcp" ]]; then
-        echo "🔌 Running in MCP mode (stdio)..."
-        ../../target/release/synapse --mcp
-    else
-        echo "🌐 Starting gRPC server on localhost:50051..."
-        ../../target/release/synapse
-    fi
+# The MCP App UI (ui:// resources) is served from frontend/dist/index.html.
+if command -v npm &> /dev/null; then
+    echo "Building frontend MCP App..." >&2
+    (cd frontend && npm install && npm run build) >&2
 else
-    echo "❌ Build failed. Check errors above."
-    exit 1
+    echo "npm not found: skipping frontend build (ui:// resources will show an error page)" >&2
 fi
+
+echo "Building Rust server..." >&2
+cargo build --release -p synapse-core >&2
+
+exec ./target/release/synapse "$@"

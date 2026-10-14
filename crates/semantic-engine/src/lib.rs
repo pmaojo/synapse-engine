@@ -1,10 +1,7 @@
-pub mod audit;
-pub mod auth;
-pub mod disambiguation;
 pub mod ingest;
+pub mod iri;
 pub mod mcp;
 pub mod md_sync;
-pub mod persistence;
 pub mod reasoner;
 pub mod scenarios;
 pub mod store;
