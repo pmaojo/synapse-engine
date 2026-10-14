@@ -1,191 +1,217 @@
-use oxrdf::{NamedNode, Quad, Subject, Term, Literal};
+use crate::iri;
+use anyhow::Result;
+use oxigraph::model::{Literal, NamedNode, Term, Triple};
 use regex::Regex;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 use std::path::Path;
+use std::sync::OnceLock;
 use yaml_front_matter::{Document, YamlFrontMatter};
 
-#[derive(Debug, Deserialize, Clone)]
+/// Heading of the section [`super::writer::MarkdownWriter`] maintains. Everything
+/// from this heading on is ignored when parsing, so derived backlinks never
+/// become facts of their own.
+pub const BACKLINKS_HEADING: &str = "## 🧠 Synapse Backlinks";
+
+#[derive(Debug, Deserialize, Clone, Default)]
 pub struct SynapseFrontmatter {
     #[serde(rename = "type")]
     pub entity_type: Option<String>,
+    /// Explicit identity; overrides the path-derived id.
     pub uri: Option<String>,
-    // Permite campos extra dinámicos
     #[serde(flatten)]
-    pub properties: std::collections::HashMap<String, serde_yaml::Value>,
+    pub properties: std::collections::BTreeMap<String, serde_yaml::Value>,
 }
 
-pub struct ParsedBlock {
-    pub hash: String,
-    pub content: String,
-    pub extracted_links: Vec<SemanticLink>,
-}
-
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct SemanticLink {
-    pub property: Option<String>, // e.g., "es_un" from [[es_un::Concepto]]
-    pub target: String,           // e.g., "Concepto"
+    /// Relation of a typed link: `rel` in `[[rel:target]]` (OKF) or `[[rel::target]]`.
+    pub property: Option<String>,
+    pub target: String,
 }
 
 pub struct MarkdownDocument {
+    /// Stable id: the path relative to the indexed root, without extension.
+    pub concept_id: String,
     pub file_path: String,
-    pub file_hash: String,
+    /// SHA-256 of the file without its backlinks section.
+    pub content_hash: String,
     pub frontmatter: Option<SynapseFrontmatter>,
-    pub blocks: Vec<ParsedBlock>,
+    pub links: Vec<SemanticLink>,
 }
 
 impl MarkdownDocument {
-    pub fn parse<P: AsRef<Path>>(path: P, raw_content: &str) -> Result<Self, anyhow::Error> {
-        // 1. Extraer YAML Frontmatter
-        let document: Result<Document<SynapseFrontmatter>, _> = YamlFrontMatter::parse(raw_content);
+    pub fn parse(concept_id: &str, file_path: &Path, raw_content: &str) -> Result<Self> {
+        let raw = strip_backlinks(raw_content);
+        let mut hasher = Sha256::new();
+        hasher.update(raw.as_bytes());
+        let content_hash = hex::encode(hasher.finalize());
 
-        let (metadata, content) = match document {
-            Ok(doc) => (Some(doc.metadata), doc.content),
-            Err(_) => (None, raw_content.to_string()),
+        let (frontmatter, body) = if raw.trim_start().starts_with("---") {
+            match YamlFrontMatter::parse::<SynapseFrontmatter>(raw) {
+                Ok(Document { metadata, content }) => (Some(metadata), content),
+                Err(_) => (None, raw.to_string()),
+            }
+        } else {
+            (None, raw.to_string())
         };
 
-        // 2. Hashear el archivo para proveniencia
-        let mut hasher = Sha256::new();
-        hasher.update(content.as_bytes());
-        let file_hash = hex::encode(hasher.finalize());
-
-        // 3. Parsear bloques e extraer wikilinks usando RegEx
-        // ([[Entidad]] o [[propiedad::Entidad]])
-        let mut blocks = Vec::new();
-        let wikilink_re = Regex::new(r"\[\[(?:(?P<prop>[^\]:]+)::)?(?P<target>[^\]]+)\]\]").unwrap();
-
-        // Tratamos cada línea o párrafo separado como un bloque lógico simple por ahora
-        for (i, p) in content.split("\n\n").enumerate() {
-            let p_trim = p.trim();
-            if p_trim.is_empty() {
-                continue;
-            }
-
-            let mut block_hasher = Sha256::new();
-            block_hasher.update(p_trim.as_bytes());
-            block_hasher.update(file_hash.as_bytes());
-            block_hasher.update(i.to_string().as_bytes());
-            let block_hash = hex::encode(block_hasher.finalize());
-
-            let mut extracted_links = Vec::new();
-            for caps in wikilink_re.captures_iter(p_trim) {
-                let prop = caps.name("prop").map(|m| m.as_str().to_string());
-                let target = caps.name("target").unwrap().as_str().to_string();
-                extracted_links.push(SemanticLink { property: prop, target });
-            }
-
-            blocks.push(ParsedBlock {
-                hash: block_hash,
-                content: p_trim.to_string(),
-                extracted_links,
-            });
-        }
-
         Ok(Self {
-            file_path: path.as_ref().to_string_lossy().to_string(),
-            file_hash,
-            frontmatter: metadata,
-            blocks,
+            concept_id: concept_id.to_string(),
+            file_path: file_path.to_string_lossy().to_string(),
+            content_hash,
+            frontmatter,
+            links: extract_links(&body),
         })
     }
 
-    /// Genera los N-Quads listos para insertar en Oxigraph
-    pub fn to_quads(&self) -> Vec<Quad> {
-        let mut quads = Vec::new();
-        let base_uri = self
-            .frontmatter
-            .as_ref()
-            .and_then(|f| f.uri.clone())
-            .unwrap_or_else(|| format!("urn:synapse:entity:{}", self.file_hash));
+    /// The entity this document describes.
+    pub fn subject(&self) -> Result<NamedNode> {
+        match self.frontmatter.as_ref().and_then(|f| f.uri.as_deref()) {
+            Some(uri) => iri::entity(uri),
+            None => iri::entity(&self.concept_id),
+        }
+    }
 
-        let subject_node = NamedNode::new(base_uri.clone()).unwrap();
-        let subject = Subject::NamedNode(subject_node.clone());
-
-        // Identificador del archivo de origen
-        let file_node = NamedNode::new(format!("file://{}", self.file_path)).unwrap();
-
-        // 1. Tripleta base: El archivo MD representa esta entidad
-        let p_derived = NamedNode::new("http://www.w3.org/ns/prov#wasDerivedFrom").unwrap();
-        quads.push(Quad::new(
+    /// Triples stated by the document (the caller decides which graph owns them).
+    pub fn to_triples(&self) -> Result<Vec<Triple>> {
+        let subject = self.subject()?;
+        let mut out = vec![Triple::new(
             subject.clone(),
-            p_derived.clone(),
-            Term::NamedNode(file_node),
-            oxrdf::GraphName::DefaultGraph,
-        ));
+            iri::node(iri::PROV_DERIVED_FROM),
+            iri::file_iri(&self.file_path),
+        )];
 
-        // 2. Propiedades del Frontmatter
         if let Some(fm) = &self.frontmatter {
             if let Some(t) = &fm.entity_type {
-                let p_type = NamedNode::new("http://www.w3.org/1999/02/22-rdf-syntax-ns#type").unwrap();
-                let o_type = NamedNode::new(format!("urn:synapse:type:{}", t)).unwrap();
-                quads.push(Quad::new(
-                    subject.clone(),
-                    p_type,
-                    Term::NamedNode(o_type),
-                    oxrdf::GraphName::DefaultGraph,
-                ));
+                out.push(Triple::new(subject.clone(), iri::node(iri::RDF_TYPE), iri::class(t)?));
             }
-
-            for (k, v) in &fm.properties {
-                let pred = NamedNode::new(format!("urn:synapse:prop:{}", k)).unwrap();
-
-                let value_str = match v {
-                    serde_yaml::Value::String(s) => s.clone(),
-                    serde_yaml::Value::Number(n) => n.to_string(),
-                    serde_yaml::Value::Bool(b) => b.to_string(),
-                    _ => continue, // Skip complex nested types for now
-                };
-
-                quads.push(Quad::new(
-                    subject.clone(),
-                    pred,
-                    Term::Literal(Literal::new_simple_literal(value_str)),
-                    oxrdf::GraphName::DefaultGraph,
-                ));
+            for (key, value) in &fm.properties {
+                let pred = iri::predicate(key)?;
+                for lit in yaml_literals(value) {
+                    if key == "title" {
+                        out.push(Triple::new(subject.clone(), iri::node(iri::RDFS_LABEL), lit.clone()));
+                    }
+                    out.push(Triple::new(subject.clone(), pred.clone(), lit));
+                }
             }
         }
 
-        // 3. Relaciones extraídas de los bloques (Wikilinks)
-        for block in &self.blocks {
-            let block_uri = format!("urn:synapse:md:{}#block_{}", self.file_hash, block.hash);
-            let block_node = NamedNode::new(block_uri.clone()).unwrap();
-
-            for link in &block.extracted_links {
-                let pred_uri = if let Some(p) = &link.property {
-                    format!("urn:synapse:prop:{}", p)
-                } else {
-                    "urn:synapse:prop:mentions".to_string()
-                };
-
-                let pred = NamedNode::new(pred_uri).unwrap();
-
-                // Tratar el target como un URN si no es URL
-                let target_uri = if link.target.starts_with("http") || link.target.starts_with("urn:") {
-                    link.target.clone()
-                } else {
-                    format!("urn:synapse:entity:{}", link.target.replace(" ", "_"))
-                };
-
-                let obj = NamedNode::new(target_uri).unwrap();
-
-                // Añadimos el GraphName con el block_node para tener la proveniencia exacta (N-Quads)
-                quads.push(Quad::new(
-                    subject.clone(),
-                    pred,
-                    Term::NamedNode(obj),
-                    oxrdf::GraphName::NamedNode(block_node.clone()),
-                ));
-
-                // Relacionar el block con el archivo original para rastreabilidad
-                quads.push(Quad::new(
-                    Subject::NamedNode(block_node.clone()),
-                    p_derived.clone(),
-                    Term::Literal(Literal::new_simple_literal(&self.file_path)),
-                    oxrdf::GraphName::DefaultGraph,
-                ));
-            }
+        for link in &self.links {
+            let pred = match &link.property {
+                Some(p) => iri::predicate(p)?,
+                None => iri::predicate("mentions")?,
+            };
+            out.push(Triple::new(subject.clone(), pred, iri::entity(&link.target)?));
         }
+        Ok(out)
+    }
+}
 
-        quads
+/// Content without the backlinks section nor trailing whitespace (so writing
+/// the section never changes the content hash).
+pub fn strip_backlinks(content: &str) -> &str {
+    match content.find(BACKLINKS_HEADING) {
+        Some(i) => &content[..i],
+        None => content,
+    }
+    .trim_end()
+}
+
+fn extract_links(body: &str) -> Vec<SemanticLink> {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    // [[target]], [[target|alias]], [[rel:target]], [[rel::target]]
+    let re = RE.get_or_init(|| Regex::new(r"\[\[([^\[\]|]+?)(?:\|[^\]]*)?\]\]").unwrap());
+    re.captures_iter(body).filter_map(|c| parse_link(c[1].trim())).collect()
+}
+
+fn parse_link(inner: &str) -> Option<SemanticLink> {
+    if inner.is_empty() {
+        return None;
+    }
+    if let Some((rel, target)) = inner.split_once("::") {
+        return Some(SemanticLink { property: Some(rel.trim().to_string()), target: target.trim().to_string() });
+    }
+    if let Some((rel, target)) = inner.split_once(':') {
+        let is_rel = !rel.is_empty()
+            && rel.chars().all(|c| c.is_alphanumeric() || c == '_' || c == '-')
+            && !iri::is_reserved_prefix(rel)
+            && !target.starts_with("//");
+        if is_rel && !target.trim().is_empty() {
+            return Some(SemanticLink { property: Some(rel.to_string()), target: target.trim().to_string() });
+        }
+    }
+    Some(SemanticLink { property: None, target: inner.to_string() })
+}
+
+fn yaml_literals(value: &serde_yaml::Value) -> Vec<Term> {
+    use serde_yaml::Value;
+    let xsd = |t: &str| iri::node(&format!("http://www.w3.org/2001/XMLSchema#{t}"));
+    match value {
+        Value::String(s) => vec![Literal::new_simple_literal(s).into()],
+        Value::Bool(b) => vec![Literal::new_typed_literal(b.to_string(), xsd("boolean")).into()],
+        Value::Number(n) if n.is_f64() => vec![Literal::new_typed_literal(n.to_string(), xsd("double")).into()],
+        Value::Number(n) => vec![Literal::new_typed_literal(n.to_string(), xsd("integer")).into()],
+        Value::Sequence(items) => items.iter().flat_map(yaml_literals).collect(),
+        _ => Vec::new(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(raw: &str) -> MarkdownDocument {
+        MarkdownDocument::parse("people/alice", Path::new("/kb/people/alice.md"), raw).unwrap()
+    }
+
+    #[test]
+    fn identity_comes_from_the_path_not_the_content() {
+        let a = parse("---\ntype: person\n---\nHello");
+        let b = parse("---\ntype: person\n---\nHello, edited");
+        assert_eq!(a.subject().unwrap(), b.subject().unwrap());
+        assert_eq!(a.subject().unwrap().as_str(), "urn:synapse:entity:people/alice");
+        assert_ne!(a.content_hash, b.content_hash);
+    }
+
+    #[test]
+    fn frontmatter_uri_overrides_identity() {
+        let d = parse("---\nuri: https://example.org/alice\n---\n");
+        assert_eq!(d.subject().unwrap().as_str(), "https://example.org/alice");
+    }
+
+    #[test]
+    fn okf_and_legacy_links() {
+        let d = parse("Works with [[people/bob]], [[depends_on:libs/sqlx]], [[es_un::Concepto]], [[Bob|el bueno de Bob]], [[https://x.org/a]] and [[schema:Person]].");
+        let links: Vec<_> = d.links.iter().map(|l| (l.property.as_deref(), l.target.as_str())).collect();
+        assert_eq!(
+            links,
+            vec![
+                (None, "people/bob"),
+                (Some("depends_on"), "libs/sqlx"),
+                (Some("es_un"), "Concepto"),
+                (None, "Bob"),
+                (None, "https://x.org/a"),
+                (None, "schema:Person"),
+            ]
+        );
+    }
+
+    #[test]
+    fn backlinks_section_is_ignored() {
+        let d = parse("Body [[a]]\n\n## 🧠 Synapse Backlinks\n- **mentions**: [[b]]\n");
+        assert_eq!(d.links.len(), 1);
+        assert_eq!(d.content_hash, parse("Body [[a]]\n").content_hash);
+    }
+
+    #[test]
+    fn frontmatter_values_become_typed_literals() {
+        let d = parse("---\ntype: person\ntitle: Alice\nage: 30\ntags:\n  - staff\n  - rust\n---\n");
+        let t = d.to_triples().unwrap();
+        let has = |p: &str, o: &str| t.iter().any(|tr| tr.predicate.as_str() == p && tr.object.to_string() == o);
+        assert!(has(iri::RDF_TYPE, "<urn:synapse:type:person>"));
+        assert!(has(iri::RDFS_LABEL, "\"Alice\""));
+        assert!(has("urn:synapse:prop:age", "\"30\"^^<http://www.w3.org/2001/XMLSchema#integer>"));
+        assert!(has("urn:synapse:prop:tags", "\"rust\""));
     }
 }

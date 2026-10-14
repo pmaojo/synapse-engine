@@ -1,4 +1,6 @@
+use crate::iri;
 use crate::store::SynapseStore;
+use oxigraph::model::{Literal, Term, Triple};
 use serde_json::{json, Value};
 use std::sync::Arc;
 
@@ -68,8 +70,49 @@ pub async fn handle_tool_call(
                     }
                 },
                 {
+                    "name": "assert_facts",
+                    "description": ASSERT_FACTS_DESCRIPTION,
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "facts": {
+                                "type": "array",
+                                "minItems": 1,
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "subject": { "type": "string", "description": "Entity id (people/bob), CURIE (schema:x) or full IRI" },
+                                        "predicate": { "type": "string", "description": "Relation name (works_at), 'a' for rdf:type, CURIE (rdfs:label) or full IRI" },
+                                        "object": { "type": "string" },
+                                        "object_type": { "type": "string", "enum": ["entity", "literal"], "description": "Default: 'entity' when predicate is 'a'/rdf:type or object is a full IRI; otherwise 'literal'" },
+                                        "datatype": { "type": "string", "description": "Literal datatype, e.g. xsd:integer, xsd:date" },
+                                        "lang": { "type": "string", "description": "Literal language tag, e.g. es" }
+                                    },
+                                    "required": ["subject", "predicate", "object"]
+                                }
+                            },
+                            "source": { "type": "string", "description": "Who is asserting (agent or person name). Default: 'agent'" },
+                            "reason": { "type": "string", "description": "Why these facts are true (stored as provenance)" }
+                        },
+                        "required": ["facts"]
+                    }
+                },
+                {
+                    "name": "retract_facts",
+                    "description": "Retract facts previously asserted, either a whole assertion (assertion_id) or individual facts (same shape as assert_facts). Facts stated by a Markdown/ontology source are not removed: edit the source and re-index it. Every retraction is logged with its reason in the provenance graph.",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "assertion_id": { "type": "string", "description": "IRI returned by assert_facts (urn:synapse:assertion:…)" },
+                            "facts": { "type": "array", "items": { "type": "object" } },
+                            "source": { "type": "string" },
+                            "reason": { "type": "string" }
+                        }
+                    }
+                },
+                {
                     "name": "index_markdown_directory",
-                    "description": "Trigger ingestion of a folder containing markdown files to sync with the graph.",
+                    "description": "Index (or re-index) a folder of Markdown files, e.g. an OKF bundle. Each file is one entity whose id is its path relative to the folder without extension (people/bob.md -> people/bob); [[target]], [[rel:target]] and [[rel::target]] become relations; frontmatter fields become properties ('type' -> rdf:type). Re-indexing replaces what changed files said and drops files that were deleted.",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
@@ -91,13 +134,13 @@ pub async fn handle_tool_call(
                 },
                 {
                     "name": "get_provenance",
-                    "description": "Fetch the full provenance trace for a specific provenance hash snippet.",
+                    "description": "Fetch the provenance of a graph: an assertion id, a source graph, or a prefix of either (as shown in [Prov: …] tags).",
                     "inputSchema": {
                         "type": "object",
                         "properties": {
-                            "hash": { "type": "string" }
+                            "id": { "type": "string" }
                         },
-                        "required": ["hash"]
+                        "required": ["id"]
                     }
                 }
             ]
@@ -120,32 +163,27 @@ pub async fn handle_tool_call(
                     }
                 }
                 "get_provenance" => {
-                    let hash = args["hash"].as_str().ok_or("Missing hash")?;
-                    let hash_str = if hash.starts_with("urn:batch:") {
-                        hash.to_string()
+                    let id = args["id"].as_str().or_else(|| args["hash"].as_str()).ok_or("Missing id")?;
+                    let id = id.trim().trim_start_matches('<').trim_end_matches('>');
+                    let prefix = if iri::is_absolute(id) { id.to_string() } else { format!("{}{}", iri::ASSERTION_NS, id) };
+                    let meta = iri::node(iri::META_GRAPH);
+                    let mut lines: Vec<String> = store
+                        .store
+                        .quads_for_pattern(None, None, None, Some(meta.as_ref().into()))
+                        .flatten()
+                        .filter(|q| match &q.subject {
+                            oxigraph::model::Subject::NamedNode(n) => n.as_str().starts_with(&prefix),
+                            _ => false,
+                        })
+                        .map(|q| format!("{} {} {}", q.subject, iri::short(q.predicate.as_str()), q.object))
+                        .collect();
+                    lines.sort();
+                    let text = if lines.is_empty() {
+                        format!("No provenance found for {}", id)
                     } else {
-                        format!("urn:batch:{}", hash)
+                        format!("Provenance Trace for {}:\n{}", id, lines.join("\n"))
                     };
-
-                    // Use FILTER(STRSTARTS) to handle truncated hashes correctly.
-                    // Provenance triples are stored in the default graph for easy querying.
-                    let query = format!("
-                        PREFIX prov: <http://www.w3.org/ns/prov#>
-                        SELECT ?graph ?p ?o
-                        WHERE {{
-                            ?graph ?p ?o .
-                            FILTER(STRSTARTS(STR(?graph), \"{}\"))
-                        }}
-                    ", hash_str);
-
-                    match store.query_sparql(&query) {
-                        Ok(res) => Ok(json!({
-                            "content": [
-                                { "type": "text", "text": format!("Provenance Trace for {}:\n{}", hash, res) }
-                            ]
-                        })),
-                        Err(e) => Err(format!("SPARQL Error: {}", e)),
-                    }
+                    Ok(json!({ "content": [ { "type": "text", "text": text } ] }))
                 }
                 "get_domain_logic" => {
                     let slice_name = args["slice_name"].as_str().ok_or("Missing slice_name")?;
@@ -156,7 +194,7 @@ pub async fn handle_tool_call(
                             ?s ?p ?o .
                             ?s rdfs:subClassOf* <{}> .
                         }}
-                    ", store.ensure_uri(slice_name));
+                    ", iri::class(slice_name).map_err(|e| e.to_string())?.as_str());
 
                     match store.query_sparql(&query) {
                         Ok(res) => Ok(json!({
@@ -174,11 +212,12 @@ pub async fn handle_tool_call(
                     // Since dynamic depth and unbounded variable property paths (?p+) are invalid in standard SPARQL 1.1,
                     // we simulate depth by executing a programmatic BFS locally or constructing explicit UNION blocks
                     // For the sake of standard SPARQL compatibility, we construct a pattern of explicit depth joins up to the bound
+                    let component_iri = iri::entity(component_name).map_err(|e| e.to_string())?;
                     let mut union_blocks = Vec::new();
 
                     for d in 1..=depth {
                         let mut block = String::new();
-                        block.push_str(&format!("?s1 ?p1 <{}> . \n", store.ensure_uri(component_name)));
+                        block.push_str(&format!("?s1 ?p1 <{}> . \n", component_iri));
                         if d > 1 {
                             for i in 2..=d {
                                 block.push_str(&format!("?s{} ?p{} ?s{} . \n", i, i, i - 1));
@@ -212,7 +251,7 @@ pub async fn handle_tool_call(
 
                     let path = std::path::Path::new(spec_file_path);
                     if path.is_file() {
-                        match engine.ingest_file(path, "CoreSpecification").await {
+                        match engine.ingest_file(path, Some("CoreSpecification")).await {
                             Ok(count) => Ok(json!({
                                 "content": [
                                     { "type": "text", "text": format!("Successfully ingested {} new triples from specification file {}", count, spec_file_path) }
@@ -226,6 +265,7 @@ pub async fn handle_tool_call(
                 }
                 "get_entity_narrative" => {
                     let entity_id = args["entity_id"].as_str().ok_or("Missing entity_id")?;
+                    let entity_iri = iri::entity(entity_id).map_err(|e| e.to_string())?;
                     // We add ORDER BY ?time DESC to get adaptive context window based on recency
                     // Core properties (like type) are stored in the default graph, so we query without GRAPH restriction,
                     // and use OPTIONAL GRAPH to get provenance metadata if available.
@@ -243,7 +283,7 @@ pub async fn handle_tool_call(
                             }}
                         }}
                         ORDER BY DESC(?time)
-                    ", store.ensure_uri(entity_id), store.ensure_uri(entity_id));
+                    ", entity_iri.as_str(), entity_iri.as_str());
 
                     let inbound_query = format!("
                         PREFIX rdfs: <http://www.w3.org/2000/01/rdf-schema#>
@@ -259,7 +299,7 @@ pub async fn handle_tool_call(
                             }}
                         }}
                         ORDER BY DESC(?time)
-                    ", store.ensure_uri(entity_id), store.ensure_uri(entity_id));
+                    ", entity_iri.as_str(), entity_iri.as_str());
 
                     let mut type_val = String::from("Unknown");
                     let mut attributes = Vec::new();
@@ -278,13 +318,7 @@ pub async fn handle_tool_call(
                                     let time = row.get("time").and_then(|v| v.as_str()).unwrap_or("").trim_matches('"');
                                     let g = row.get("g").and_then(|v| v.as_str()).unwrap_or("").trim_matches('"');
 
-                                    let prov_hash = if g.starts_with("urn:batch:") {
-                                        let hash_part = &g["urn:batch:".len()..];
-                                        let short_hash = if hash_part.len() > 8 { &hash_part[..8] } else { hash_part };
-                                        format!(" [Prov: {}]", short_hash)
-                                    } else {
-                                        String::new()
-                                    };
+                                    let prov_hash = prov_tag(g);
 
                                     if p.ends_with("type") {
                                         type_val = o_clean.to_string();
@@ -311,13 +345,7 @@ pub async fn handle_tool_call(
                                     let time = row.get("time").and_then(|v| v.as_str()).unwrap_or("").trim_matches('"');
                                     let g = row.get("g").and_then(|v| v.as_str()).unwrap_or("").trim_matches('"');
 
-                                    let prov_hash = if g.starts_with("urn:batch:") {
-                                        let hash_part = &g["urn:batch:".len()..];
-                                        let short_hash = if hash_part.len() > 8 { &hash_part[..8] } else { hash_part };
-                                        format!(" [Prov: {}]", short_hash)
-                                    } else {
-                                        String::new()
-                                    };
+                                    let prov_hash = prov_tag(g);
 
                                     inbound.push(format!("- {} -> **{}**{}", s, p.split(&['/', '#'][..]).last().unwrap_or(p), prov_hash));
                                     if time > recent_context.as_str() {
@@ -369,33 +397,61 @@ pub async fn handle_tool_call(
                     }
                 }
                 "index_markdown_directory" => {
-                    use walkdir::WalkDir;
-
                     use crate::ingest::IngestionEngine;
 
                     let dir_path = args["directory_path"].as_str().ok_or("Missing directory_path")?;
                     let engine = IngestionEngine::new(store.clone());
-                    let mut total_added = 0;
-
-                    for entry in WalkDir::new(dir_path).into_iter().filter_map(|e| e.ok()) {
-                        let path = entry.path();
-                        if path.is_file() {
-                            if let Some(ext) = path.extension() {
-                                if ext == "md" || ext == "markdown" {
-                                    match engine.ingest_file(path, "default").await {
-                                        Ok(count) => total_added += count,
-                                        Err(e) => eprintln!("Failed to index file {}: {}", path.display(), e),
-                                    }
-                                }
-                            }
-                        }
+                    let report = engine
+                        .index_markdown_directory(std::path::Path::new(dir_path))
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    let mut text = format!(
+                        "Indexed {}: {} changed file(s) ({} triples), {} unchanged, {} removed.",
+                        dir_path, report.changed, report.triples, report.unchanged, report.removed
+                    );
+                    if !report.errors.is_empty() {
+                        text.push_str(&format!("\nErrors:\n{}", report.errors.join("\n")));
                     }
-
+                    Ok(json!({ "content": [ { "type": "text", "text": text } ] }))
+                }
+                "assert_facts" => {
+                    let facts = parse_facts(&args["facts"])?;
+                    let source = args["source"].as_str().unwrap_or("agent");
+                    let out = store
+                        .assert_facts(&facts, source, args["reason"].as_str())
+                        .map_err(|e| e.to_string())?;
+                    let listed: Vec<String> = facts.iter().map(|t| format!("{t} .")).collect();
                     Ok(json!({
-                        "content": [
-                            { "type": "text", "text": format!("Successfully indexed {} new triples from markdown files in {}", total_added, dir_path) }
-                        ]
+                        "content": [ { "type": "text", "text": format!(
+                            "Asserted {} fact(s) as {} ({} new, {} already supported by other sources):\n{}",
+                            facts.len(), out.assertion.as_str(), out.inserted - out.already_known.min(out.inserted), out.already_known, listed.join("\n")
+                        ) } ]
                     }))
+                }
+                "retract_facts" => {
+                    let source = args["source"].as_str().unwrap_or("agent");
+                    let reason = args["reason"].as_str();
+                    let out = if let Some(id) = args["assertion_id"].as_str() {
+                        let graph = iri::entity(id).map_err(|e| e.to_string())?;
+                        store.retract_assertion(&graph, source, reason)
+                    } else if args.get("facts").is_some() {
+                        store.retract_facts(&parse_facts(&args["facts"])?, source, reason)
+                    } else {
+                        return Err("Provide assertion_id or facts".to_string());
+                    }
+                    .map_err(|e| e.to_string())?;
+
+                    let mut text = match &out.retraction {
+                        Some(r) => format!("Retracted {} fact(s) (logged as {}).", out.removed.len(), r.as_str()),
+                        None => "Nothing retracted.".to_string(),
+                    };
+                    for (t, g) in &out.owned_by_sources {
+                        text.push_str(&format!("\nNot retracted, stated by source {}: {} .", g.as_str(), t));
+                    }
+                    for t in &out.not_found {
+                        text.push_str(&format!("\nNot found: {} .", t));
+                    }
+                    Ok(json!({ "content": [ { "type": "text", "text": text } ] }))
                 }
                 _ => Err(format!("Unknown tool: {}", name)),
             }
@@ -460,5 +516,59 @@ pub async fn handle_tool_call(
         })),
         "notifications/initialized" => Ok(json!({})),
         _ => Err(format!("Method not supported: {}", method)),
+    }
+}
+
+const ASSERT_FACTS_DESCRIPTION: &str = "Record facts in long-term memory as one assertion with provenance (source, reason, time). Use stable ids: the same id always means the same entity, and Markdown files indexed with index_markdown_directory use their relative path as id (people/bob). Returns the assertion id, which retract_facts accepts.";
+
+/// Parses the `facts` argument of assert_facts / retract_facts.
+fn parse_facts(value: &Value) -> Result<Vec<Triple>, String> {
+    let items = value.as_array().ok_or("'facts' must be an array")?;
+    if items.is_empty() {
+        return Err("'facts' is empty".to_string());
+    }
+    items
+        .iter()
+        .enumerate()
+        .map(|(i, f)| parse_fact(f).map_err(|e| format!("facts[{}]: {}", i, e)))
+        .collect()
+}
+
+fn parse_fact(f: &Value) -> Result<Triple, String> {
+    let field = |k: &str| f[k].as_str().map(str::trim).filter(|s| !s.is_empty()).ok_or(format!("missing '{}'", k));
+    let subject = iri::entity(field("subject")?).map_err(|e| e.to_string())?;
+    let predicate = iri::predicate(field("predicate")?).map_err(|e| e.to_string())?;
+    let object = f["object"].as_str().ok_or("missing 'object'")?;
+    let is_type = predicate.as_str() == iri::RDF_TYPE;
+
+    let as_entity = match f["object_type"].as_str() {
+        Some("entity") | Some("iri") => true,
+        Some("literal") => false,
+        Some(other) => return Err(format!("unknown object_type '{}'", other)),
+        None => is_type || iri::is_absolute(object.trim()),
+    };
+
+    let object: Term = if as_entity {
+        if is_type { iri::class(object) } else { iri::entity(object) }.map_err(|e| e.to_string())?.into()
+    } else if let Some(lang) = f["lang"].as_str() {
+        Literal::new_language_tagged_literal(object, lang).map_err(|e| e.to_string())?.into()
+    } else if let Some(dt) = f["datatype"].as_str() {
+        Literal::new_typed_literal(object, iri::datatype(dt).map_err(|e| e.to_string())?).into()
+    } else {
+        Literal::new_simple_literal(object).into()
+    };
+    Ok(Triple::new(subject, predicate, object))
+}
+
+/// `[Prov: …]` tag for a graph IRI as returned by SPARQL (`<…>`).
+fn prov_tag(graph: &str) -> String {
+    let g = graph.trim_start_matches('<').trim_end_matches('>');
+    if let Some(id) = g.strip_prefix(iri::ASSERTION_NS) {
+        format!(" [Prov: {}]", &id[..id.len().min(8)])
+    } else if let Some(src) = g.strip_prefix(iri::SOURCE_NS) {
+        let file = src.strip_prefix("file:").and_then(|p| iri::file_path(&format!("file://{}", p))).unwrap_or_else(|| src.to_string());
+        format!(" [Source: {}]", file.rsplit('/').next().unwrap_or(&file))
+    } else {
+        String::new()
     }
 }

@@ -2,6 +2,7 @@ use std::env;
 use std::sync::Arc;
 use synapse_core::mcp::server::start_mcp_server;
 use synapse_core::mcp::stdio::run_stdio_mcp_server;
+use synapse_core::scenarios::ScenarioManager;
 use synapse_core::store::SynapseStore;
 
 #[tokio::main]
@@ -12,6 +13,20 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let storage_path = env::var("GRAPH_STORAGE_PATH").unwrap_or_else(|_| "data/graphs".to_string());
 
     let store = Arc::new(SynapseStore::open("default", &storage_path)?);
+
+    // Ontologies of the scenarios listed in SYNAPSE_SCENARIOS (default: core).
+    let scenarios = ScenarioManager::new(env::var("SYNAPSE_HOME").unwrap_or_else(|_| ".".to_string()));
+    for name in env::var("SYNAPSE_SCENARIOS").unwrap_or_else(|_| "core".to_string()).split(',') {
+        let name = name.trim();
+        if name.is_empty() {
+            continue;
+        }
+        match scenarios.load_scenario(&store, name).await {
+            Ok(n) if n > 0 => eprintln!("Scenario '{}': loaded {} triples", name, n),
+            Ok(_) => {}
+            Err(e) => eprintln!("Warning: {}", e),
+        }
+    }
 
     if is_stdio {
         eprintln!("Synapse-MCP starting in stdio mode...");
