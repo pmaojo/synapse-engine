@@ -1,4 +1,3 @@
-pub mod extractor;
 pub mod ontology;
 
 use crate::store::{IngestTriple, SynapseStore};

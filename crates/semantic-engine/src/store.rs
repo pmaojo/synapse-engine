@@ -1,22 +1,10 @@
-use crate::persistence::{load_bincode, save_bincode};
 use anyhow::Result;
 use oxigraph::model::*;
 use oxigraph::store::Store;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::RwLock;
 use uuid::Uuid;
-
-const DEFAULT_MAPPING_SAVE_THRESHOLD: usize = 1000;
-
-/// Persisted URI mappings
-#[derive(Serialize, Deserialize, Default)]
-struct UriMappings {
-    uri_to_id: HashMap<String, u32>,
-    next_id: u32,
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Provenance {
@@ -36,13 +24,6 @@ pub struct SynapseStore {
     pub store: Store,
     pub namespace: String,
     pub storage_path: PathBuf,
-    // Mapping for gRPC compatibility (ID <-> URI)
-    pub id_to_uri: RwLock<HashMap<u32, String>>,
-    pub uri_to_id: RwLock<HashMap<String, u32>>,
-    pub next_id: std::sync::atomic::AtomicU32,
-    // Persistence state
-    dirty_count: AtomicUsize,
-    save_threshold: usize,
 }
 
 impl SynapseStore {
@@ -54,109 +35,11 @@ impl SynapseStore {
         // so Store::open utilizes rocksdb directly for persistence.
         let store = Store::open(&path)?;
 
-        // Load persisted URI mappings if they exist
-        let mappings_path_bin = path.join("uri_mappings.bin");
-        let mappings_path_json = path.join("uri_mappings.json");
-
-        let (uri_to_id, id_to_uri, next_id) = if mappings_path_bin.exists() {
-            let mappings: UriMappings = load_bincode(&mappings_path_bin)?;
-            let id_to_uri: HashMap<u32, String> = mappings
-                .uri_to_id
-                .iter()
-                .map(|(uri, &id)| (id, uri.clone()))
-                .collect();
-            (mappings.uri_to_id, id_to_uri, mappings.next_id)
-        } else if mappings_path_json.exists() {
-            let content = std::fs::read_to_string(&mappings_path_json)?;
-            let mappings: UriMappings = serde_json::from_str(&content)?;
-            let id_to_uri: HashMap<u32, String> = mappings
-                .uri_to_id
-                .iter()
-                .map(|(uri, &id)| (id, uri.clone()))
-                .collect();
-            (mappings.uri_to_id, id_to_uri, mappings.next_id)
-        } else {
-            (HashMap::new(), HashMap::new(), 1)
-        };
-
         Ok(Self {
             store,
             namespace: namespace.to_string(),
             storage_path: path,
-            id_to_uri: RwLock::new(id_to_uri),
-            uri_to_id: RwLock::new(uri_to_id),
-            next_id: std::sync::atomic::AtomicU32::new(next_id),
-            dirty_count: AtomicUsize::new(0),
-            save_threshold: DEFAULT_MAPPING_SAVE_THRESHOLD,
         })
-    }
-
-    /// Save URI mappings to disk
-    fn save_mappings(&self) -> Result<()> {
-        let mappings = UriMappings {
-            uri_to_id: self.uri_to_id.read().unwrap().clone(),
-            next_id: self.next_id.load(std::sync::atomic::Ordering::Relaxed),
-        };
-        // Capture the count before saving? No, we just care that we saved the current state.
-        // But if new items are added during save, the dirty count will increment.
-        // We need to subtract what we think we saved.
-        // Since we save the *entire* map, we effectively save *all* dirty items up to that point.
-        // So we can read the dirty count, save, then subtract.
-        let current_dirty = self.dirty_count.load(Ordering::Relaxed);
-
-        save_bincode(&self.storage_path.join("uri_mappings.bin"), &mappings)?;
-
-        if current_dirty > 0 {
-            let _ = self.dirty_count.fetch_sub(current_dirty, Ordering::Relaxed);
-        }
-        Ok(())
-    }
-
-    /// Force save all data to disk
-    pub fn flush(&self) -> Result<()> {
-        self.save_mappings()?;
-
-        // Oxigraph rocksdb auto-flushes on close, but we can call optimize if needed
-        // For now, save_mappings is the only thing we need to explicitly flush manually
-
-        Ok(())
-    }
-
-    pub fn get_or_create_id(&self, uri: &str) -> u32 {
-        {
-            let map = self.uri_to_id.read().unwrap();
-            if let Some(&id) = map.get(uri) {
-                return id;
-            }
-        }
-
-        let mut uri_map = self.uri_to_id.write().unwrap();
-        let mut id_map = self.id_to_uri.write().unwrap();
-
-        if let Some(&id) = uri_map.get(uri) {
-            return id;
-        }
-
-        let id = self
-            .next_id
-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        uri_map.insert(uri.to_string(), id);
-        id_map.insert(id, uri.to_string());
-
-        drop(uri_map);
-        drop(id_map);
-
-        // Check if we need to auto-save mappings
-        let count = self.dirty_count.fetch_add(1, Ordering::Relaxed);
-        if count + 1 >= self.save_threshold {
-            let _ = self.save_mappings();
-        }
-
-        id
-    }
-
-    pub fn get_uri(&self, id: u32) -> Option<String> {
-        self.id_to_uri.read().unwrap().get(&id).cloned()
     }
 
     pub async fn ingest_triples(&self, triples: Vec<IngestTriple>) -> Result<(u32, u32)> {
@@ -222,18 +105,13 @@ impl SynapseStore {
                 let subject_uri = self.ensure_uri(&s);
                 let predicate_uri = self.ensure_uri(&p);
 
-                let (object_term, object_key_str) = if o.starts_with('"') && o.ends_with('"') && o.len() >= 2 {
+                let (object_term, _object_key) = if o.starts_with('"') && o.ends_with('"') && o.len() >= 2 {
                     let literal_val = &o[1..o.len() - 1];
                     (Term::Literal(Literal::new_simple_literal(literal_val)), literal_val.to_string())
                 } else {
                     let uri = self.ensure_uri(&o);
                     (Term::NamedNode(NamedNode::new_unchecked(&uri)), uri)
                 };
-
-                // Register URIs in the ID mapping (for gRPC compatibility)
-                self.get_or_create_id(&subject_uri);
-                self.get_or_create_id(&predicate_uri);
-                self.get_or_create_id(&object_key_str);
 
                 let subject = Subject::NamedNode(NamedNode::new_unchecked(&subject_uri));
                 let predicate = NamedNode::new_unchecked(&predicate_uri);
@@ -377,23 +255,6 @@ impl SynapseStore {
                 Ok(serde_json::to_string(&results_array)?)
             }
             _ => Ok("[]".to_string()),
-        }
-    }
-
-    pub fn get_degree(&self, uri: &str) -> usize {
-        let node = NamedNodeRef::new(uri).ok();
-        if let Some(n) = node {
-            let outgoing = self
-                .store
-                .quads_for_pattern(Some(n.into()), None, None, None)
-                .count();
-            let incoming = self
-                .store
-                .quads_for_pattern(None, None, Some(n.into()), None)
-                .count();
-            outgoing + incoming
-        } else {
-            0
         }
     }
 

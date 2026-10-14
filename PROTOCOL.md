@@ -9,11 +9,11 @@ Este protocolo define cómo Robin gestiona la memoria a largo plazo y la estruct
     1. Identificar Entidades (Sujetos y Objetos).
     2. Identificar Relaciones (Predicados).
     3. Validar contra la Ontología actual.
-    4. Inyectar en el motor Synapse (Rust) vía gRPC/MCP.
+    4. Inyectar en el motor Synapse (Rust) vía MCP.
 
 ## 2. EL BUCLE DEL ARQUITECTO (Mantenimiento de Ontología)
 **Objetivo:** Asegurar que el "vocabulario" del sistema es suficiente y coherente.
-- **Cuándo:** Cuando Robin detecta una entidad o relación que no encaja en las clases actuales de `synapse/ontology/`.
+- **Cuándo:** Cuando Robin detecta una entidad o relación que no encaja en las clases actuales de `scenarios/core/schema/`.
 - **Proceso:**
     1. Proponer nueva Clase o Propiedad OWL.
     2. Verificar jerarquía (subClassOf) para mantener la herencia de razonamiento.

@@ -8,10 +8,10 @@ Built entirely in Rust, Synapse relies on a formal logical reasoning core instea
 
 -   **Blazing Fast Core**: Powered by Rust and [Oxigraph](https://github.com/oxigraph/oxigraph) for low-latency, strictly symbolic graph operations.
 -   **Markdown-Graph Symbiosis**: Bidirectionally syncs human-readable Markdown files (via YAML frontmatter and WikiLinks) with the active RDF graph.
--   **Reasoning Engine**: Built-in, in-memory OWL-RL and RDFS fixed-point reasoning strategies to derive implicit knowledge safely.
+-   **Reasoning Engine**: In-memory RDFS/OWL-RL fixed-point reasoner (`reasoner.rs`). *Not yet exposed through MCP* — it is not invoked by any tool today.
 -   **Scenario Marketplace**: Dynamic loading of domain-specific "scenarios" (ontologies + seed data) to instantly equip agents with specialized schemas.
 -   **Native MCP & UI Extensions**: Seamlessly integrates as a [Model Context Protocol](https://modelcontextprotocol.io) server, supporting dual-transport (HTTP/SSE or Standard I/O) and rich Ext-App HTML/d3 UI rendering.
--   **Ontology-Driven**: Automatically loads standard ontologies (Schema.org, PROV-O, SKOS, etc.) via the `core` scenario.
+-   **Ontology-Driven**: Ships standard ontologies (Schema.org, PROV-O, SKOS, FOAF, Memory) in the `core` scenario under `scenarios/core/schema/`.
 
 ## 📦 Installation & Setup
 
@@ -41,9 +41,14 @@ Add Synapse to your MCP client configuration to enable direct LLM access to the 
 ```
 
 #### Available MCP Tools:
-- `sparql_query`: Execute strict, graph-based SPARQL queries to traverse deterministic memory.
+- `sparql_query`: Execute a SPARQL query against the graph.
 - `index_markdown_directory`: Recursively map a folder of Markdown files into the RDF graph.
-- `get_entity_neighborhood`: Extract the immediate surrounding entities (1-hop) for contextual retrieval.
+- `sync_specification_to_graph`: Ingest a single Markdown file tagged as a core specification.
+- `get_entity_narrative`: Markdown dossier of an entity (attributes, outbound and inbound relations).
+- `get_entity_neighborhood`: Expand the graph around an entity (plus a `ui://` view).
+- `get_domain_logic`: Triples of every class under a given root class (`rdfs:subClassOf*`).
+- `get_dependency_impact`: Entities that point (transitively, up to `depth`) at a component.
+- `get_provenance`: Provenance metadata of an ingestion batch.
 
 #### Available MCP Resources (Ext-Apps):
 - `ui://synapse/dashboard`: Returns an interactive HTML dashboard view of the engine metrics.
@@ -56,7 +61,7 @@ Synapse enforces structural integrity via **Scenarios**. A Scenario bundles sche
 2.  **Seed Data**: Initial foundational knowledge triples.
 
 ### Built-in Scenarios:
-*   **Core**: Essential ontologies (Schema.org, PROV-O, SKOS, FOAF, Memory) loaded automatically at startup.
+*   **Core**: Essential ontologies (Schema.org, PROV-O, SKOS, FOAF, Memory).
 *   **Research Assistant**: Specialized ontologies designed for tracking academic papers and citations.
 
 ## 🏗️ Technical Architecture
@@ -65,9 +70,9 @@ Synapse enforces structural integrity via **Scenarios**. A Scenario bundles sche
 All probabilistic ML (embeddings, vectors, fastembed) has been explicitly purged. The system relies 100% on explicit RDF triples, ensuring zero hallucinations in memory recall.
 
 ### 2. The Synapse Reasoner
-The engine implements a multi-strategy materialization loop:
-*   **RDFS**: Efficient class (`rdfs:subClassOf`) and property (`rdfs:subPropertyOf`) transitivity.
-*   **OWL-RL**: Deterministic fixed-point inference for axioms like `owl:SymmetricProperty`, `owl:TransitiveProperty`, and `owl:inverseOf`.
+`reasoner.rs` implements a fixed-point materialization loop (not yet wired to any MCP tool):
+*   **RDFS**: `rdfs:subClassOf` transitivity.
+*   **OWL-RL**: `owl:SymmetricProperty`, `owl:TransitiveProperty`, `owl:inverseOf` and a binary property-chain shortcut (`urn:synapse:chainFirst` / `urn:synapse:chainSecond`).
 
 ### 3. Provenance & Integrity
 Every fact ingested into the graph is stored within an isolated Named Graph, linked via PROV-O properties (`prov:wasDerivedFrom`, `prov:generatedAtTime`). You always know exactly *where* and *when* an agent learned a piece of information.

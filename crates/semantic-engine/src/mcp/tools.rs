@@ -455,7 +455,7 @@ pub async fn handle_tool_call(
             },
             "serverInfo": {
                 "name": "synapse-core-mcp",
-                "version": "0.9.0"
+                "version": env!("CARGO_PKG_VERSION")
             }
         })),
         "notifications/initialized" => Ok(json!({})),
